@@ -1,13 +1,19 @@
 import asyncio
+from io import BytesIO
+import os
 
 from thefuzz import fuzz
 from microsoft_agents.hosting.core import TurnContext, MessageFactory, CardFactory
+import polars
+from uuid import uuid4
 
 from modules.genie import Genie
 from modules.AdaptiveCardTemplate import AdaptiveCardTemplate
 from utils.bot_utils import BotUtilities
 from handlers.genie_list_handler import GenieListHandler
-from database.database import Database, UserSelection
+from handlers.file_card_handler import FileCardHandler
+from database.database import Database
+from database.db_models import UserSelection
 
 COMMAND_LIST_SPACES = "list genie spaces"
 
@@ -15,8 +21,10 @@ COMMAND_LIST_SPACES = "list genie spaces"
 class MessageHandler:
     """This handler processes incoming messages and routes them to the appropriate logic."""
 
-    def __init__(self):
-        self.genie_list_handler = GenieListHandler()
+    def __init__(self, database: Database):
+        self.database = database
+        self.genie_list_handler = GenieListHandler(database)
+        self.file_card_handler = FileCardHandler()
 
     async def handle_card_action(
         self, turn_context: TurnContext, user_id: str, action_data: dict
@@ -36,7 +44,7 @@ class MessageHandler:
 
         elif action == "refresh_spaces":
             await turn_context.delete_activity(turn_context.activity.reply_to_id)
-            await Database().clear_user_space_mappings(
+            await self.database.clear_user_space_mappings(
                 user_id
             )  # Clear cached spaces for the user
 
@@ -81,12 +89,13 @@ class MessageHandler:
         self, turn_context: TurnContext, user_id: str, space_id: str, space_name: str
     ):
         """Save the user's space selection."""
-        await Database().update_user_selection(
+        await self.database.update_user_selection(
             user_id=user_id,
             space_id=space_id,
             space_name=space_name,
             conversation_id=None,
         )
+        await turn_context.delete_activity(turn_context.activity.reply_to_id)
         await turn_context.send_activity(
             f"✅ Selected space: **{space_name}**. You can now ask questions!"
         )
@@ -100,6 +109,7 @@ class MessageHandler:
     ):
         """Handle natural language questions to Genie."""
         genie = Genie()
+        sending_excel = False
 
         async def ask():
             return await genie.ask_genie(
@@ -120,7 +130,7 @@ class MessageHandler:
             new_conversation_id
             and new_conversation_id != user_selection.conversation_id
         ):
-            await Database().update_user_selection(
+            await self.database.update_user_selection(
                 user_id,
                 user_selection.space_id,
                 user_selection.space_name,
@@ -137,21 +147,53 @@ class MessageHandler:
 
         # Create Adaptive Card for data response
         card = AdaptiveCardTemplate()
-        card.add_text(question, is_title=True, color="Accent")
+        card.add_text(question.title(), is_title=True, color="Accent")
 
         if "query_description" in genie_response:
             card.add_text(genie_response["query_description"])
 
         if "data" in genie_response and "columns" in genie_response:
-            card.add_query_result_table(
-                genie_response["columns"], genie_response["data"]
-            )
+            if genie_response["data"]["row_count"] < 100:
+                card.add_query_result_table(
+                    genie_response["columns"], genie_response["data"]
+                )
+            else:
+                # For large datasets, we could add a button to download the results as CSV/Excel
+                sending_excel = True
+                filename = f"temp/{uuid4()}.xlsx"
+
+                def save_excel_sync(rows, schema, fname):
+                    df = polars.DataFrame(data=rows, schema=schema, orient="row")
+                    df.write_excel(fname)
+
+                await asyncio.to_thread(
+                    save_excel_sync,
+                    genie_response["data"]["data_array"],
+                    [col["name"] for col in genie_response["columns"]["columns"]],
+                    filename,
+                )
 
         if "query" in genie_response:
             card.add_sql_code(genie_response["query"])
 
         attachment = CardFactory.adaptive_card(card.get_adaptive_card())
         await turn_context.send_activity(MessageFactory.attachment(attachment))
+
+        def upload_file_and_send_card():
+            with open(filename, "rb") as f:
+                content = BytesIO(f.read())
+            os.remove(filename)
+            return content
+
+        if sending_excel:
+
+            file_bytes = await asyncio.to_thread(upload_file_and_send_card)
+            await self.file_card_handler.send_file_card(
+                turn_context,
+                filename=filename.split("/")[-1],
+                file_size=file_bytes.getbuffer().nbytes,
+                file_bytes=file_bytes,
+            )
 
     async def process_message(self, turn_context: TurnContext):
         user_id = turn_context.activity.from_property.id
@@ -177,7 +219,7 @@ class MessageHandler:
                 await turn_context.send_activity(response)
             else:
                 # Check if user has a space selected
-                user_selection = await Database().get_user_selection(user_id)
+                user_selection = await self.database.get_user_selection(user_id)
                 if user_selection and user_selection.space_id:
                     await self.handle_genie_question(
                         turn_context, user_id, text, user_selection

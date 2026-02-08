@@ -13,8 +13,8 @@ class GenieListHandler:
     This handler lists available genie spaces.
     """
 
-    def __init__(self):
-        self.db = Database()
+    def __init__(self, database: Database):
+        self.db = database
 
     async def handle_list_spaces(self, user_id: str) -> Activity:
         """Handle request to list available spaces with enhanced formatting and inline buttons."""
