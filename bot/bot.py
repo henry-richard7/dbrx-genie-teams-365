@@ -7,7 +7,7 @@ import logging
 import aiohttp
 
 from microsoft_agents.hosting.core import TurnContext
-from microsoft_agents.hosting.teams import TeamsActivityHandler
+from microsoft_agents.hosting.teams import TeamsActivityHandler, TeamsInfo
 from microsoft_agents.activity import (
     ChannelAccount,
 )
@@ -15,6 +15,7 @@ from microsoft_agents.activity import (
 from handlers.file_card_handler import FileCardHandler
 from handlers.message_handler import MessageHandler
 from database.database import Database
+from utils.user_group import UserGroup
 
 logger = logging.getLogger(__name__)
 
@@ -29,6 +30,7 @@ class TeamsGenieBot(TeamsActivityHandler):
         self.database = Database()
         self.message_handler = MessageHandler(self.database)
         self.file_card_handler = FileCardHandler()
+        self.user_group = UserGroup()
 
     async def on_members_added_activity(
         self, members_added: list[ChannelAccount], turn_context: TurnContext
@@ -105,4 +107,13 @@ class TeamsGenieBot(TeamsActivityHandler):
         await turn_context.send_activity(reply)
 
     async def on_message_activity(self, turn_context: TurnContext):
+        members = await TeamsInfo.get_member(
+            turn_context, turn_context.activity.from_property.id
+        )
+        user_email = members.email
+        user_group_ids = await self.user_group.get_user_group_ids(user_email)
+
+        user_groups = await self.database.get_security_group_mapping(user_group_ids)
+        print(f"User {user_email} belongs to groups {user_groups}")
+
         await self.message_handler.process_message(turn_context)
