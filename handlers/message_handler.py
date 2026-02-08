@@ -160,6 +160,7 @@ class MessageHandler:
             else:
                 # For large datasets, we could add a button to download the results as CSV/Excel
                 sending_excel = True
+                os.makedirs("temp", exist_ok=True)
                 filename = f"temp/{uuid4()}.xlsx"
 
                 def save_excel_sync(rows, schema, fname):

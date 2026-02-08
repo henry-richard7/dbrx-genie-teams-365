@@ -105,5 +105,4 @@ class TeamsGenieBot(TeamsActivityHandler):
         await turn_context.send_activity(reply)
 
     async def on_message_activity(self, turn_context: TurnContext):
-        await self.database.create_tables()
         await self.message_handler.process_message(turn_context)

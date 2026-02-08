@@ -44,10 +44,6 @@ class GenieListHandler:
 
                 existing_mappings = await self.db.get_user_space_mappings(user_id)
 
-            space_mappings = {
-                space.space_name: space.space_id for space in existing_mappings
-            }
-
             card_template_genie_list = AdaptiveCardTemplate()
 
             card_template_genie_list.add_text(

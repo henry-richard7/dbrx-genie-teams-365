@@ -1,4 +1,4 @@
-from .db_models import UserSelection, GenieSpace
+from .db_models import UserSelection, GenieSpace, SecurityGroupMapping
 from sqlmodel import select, SQLModel
 from sqlalchemy.ext.asyncio import create_async_engine
 from sqlmodel.ext.asyncio.session import AsyncSession
@@ -84,3 +84,13 @@ class Database:
         return await self.add_user_selection(
             user_id, space_id, space_name, conversation_id
         )
+
+    async def get_security_group_mapping(
+        self, group_id: list[str]
+    ) -> list[SecurityGroupMapping]:
+        async with AsyncSession(self.engine) as session:
+            statement = select(SecurityGroupMapping).where(
+                SecurityGroupMapping.group_id.in_(group_id)
+            )
+            result = await session.exec(statement)
+            return result.all()

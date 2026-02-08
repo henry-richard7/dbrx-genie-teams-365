@@ -61,6 +61,13 @@ if static_path.exists():
 APP["agent_configuration"] = CONFIG
 APP["adapter"] = ADAPTER
 
+
+async def on_startup(app):
+    await AGENT.database.create_tables()
+
+
+APP.on_startup.append(on_startup)
+
 if __name__ == "__main__":
     try:
         PORT = CONFIG.PORT
