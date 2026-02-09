@@ -53,6 +53,12 @@ class MessageHandler:
                 turn_context,
                 self.genie_list_handler.handle_list_spaces,
                 user_id=user_id,
+                client_id=turn_context.turn_state[
+                    "databricks_creds"
+                ].databricks_client_id,
+                client_secret=turn_context.turn_state[
+                    "databricks_creds"
+                ].databricks_client_secret,
             )
             await turn_context.send_activity(response)
 
@@ -62,6 +68,12 @@ class MessageHandler:
                 turn_context,
                 self.genie_list_handler.handle_list_spaces,
                 user_id=user_id,
+                client_id=turn_context.turn_state[
+                    "databricks_creds"
+                ].databricks_client_id,
+                client_secret=turn_context.turn_state[
+                    "databricks_creds"
+                ].databricks_client_secret,
             )
             await turn_context.send_activity(response)
 
@@ -108,7 +120,12 @@ class MessageHandler:
         user_selection: UserSelection,
     ):
         """Handle natural language questions to Genie."""
-        genie = Genie()
+        genie = Genie(
+            client_id=turn_context.turn_state["databricks_creds"].databricks_client_id,
+            client_secret=turn_context.turn_state[
+                "databricks_creds"
+            ].databricks_client_secret,
+        )
         sending_excel = False
 
         async def ask():
@@ -216,6 +233,12 @@ class MessageHandler:
                     turn_context,
                     self.genie_list_handler.handle_list_spaces,
                     user_id=user_id,
+                    client_id=turn_context.turn_state[
+                        "databricks_creds"
+                    ].databricks_client_id,
+                    client_secret=turn_context.turn_state[
+                        "databricks_creds"
+                    ].databricks_client_secret,
                 )
                 await turn_context.send_activity(response)
             else:

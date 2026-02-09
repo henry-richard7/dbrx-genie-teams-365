@@ -16,16 +16,15 @@ class GenieListHandler:
     def __init__(self, database: Database):
         self.db = database
 
-    async def handle_list_spaces(self, user_id: str) -> Activity:
+    async def handle_list_spaces(
+        self, user_id: str, client_id: str, client_secret: str
+    ) -> Activity:
         """Handle request to list available spaces with enhanced formatting and inline buttons."""
         try:
             existing_mappings = await self.db.get_user_space_mappings(user_id)
 
             if not existing_mappings:
-                print(
-                    "[**DEBUG**] No existing space mappings found for user, fetching from Genie API..."
-                )
-                genie_api = Genie()
+                genie_api = Genie(client_id=client_id, client_secret=client_secret)
                 spaces = await genie_api.get_spaces()
 
                 if not spaces:

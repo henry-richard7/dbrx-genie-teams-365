@@ -16,18 +16,23 @@ logger = logging.getLogger(__name__)
 
 
 class Genie:
-    def __init__(self):
-        self._databricks_host = environ["DATABRICKS_HOST"]
-        self._databricks_token = environ["DATABRICKS_TOKEN"]
+    def __init__(self, client_id: str = None, client_secret: str = None):
+        self._databricks_host = environ.get("DATABRICKS_HOST")
+        self._databricks_token = environ.get("DATABRICKS_TOKEN")
         self._genie_api = None
         self._workspace_client = None
+        self._client_id = client_id
+        self._client_secret = client_secret
 
     @property
     def workspace_client(self) -> WorkspaceClient:
         """Lazy initialization of workspace client."""
         if self._workspace_client is None:
             self._workspace_client = WorkspaceClient(
-                host=self._databricks_host, token=self._databricks_token
+                host=self._databricks_host,
+                # token=self._databricks_token,
+                client_id=self._client_id,
+                client_secret=self._client_secret,
             )
         return self._workspace_client
 
