@@ -112,9 +112,15 @@ class TeamsGenieBot(TeamsActivityHandler):
         await turn_context.send_activity(reply)
 
     async def on_message_activity(self, turn_context: TurnContext):
-        members = await TeamsInfo.get_member(
-            turn_context, turn_context.activity.from_property.id
-        )
+        try:
+            members = await TeamsInfo.get_member(
+                turn_context, turn_context.activity.from_property.id
+            )
+        except Exception as e:
+            logger.error(f"Failed to retrieve member info: {e}")
+            await turn_context.send_activity("Error: Could not retrieve user profile.")
+            return
+
         user_email = members.email
         user_group_ids = await self.user_group.get_user_group_ids(user_email)
 
