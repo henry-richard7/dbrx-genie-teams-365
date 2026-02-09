@@ -73,20 +73,25 @@ class TeamsGenieBot(TeamsActivityHandler):
             "Content-Range": f"bytes 0-{file_size-1}/{file_size}",
         }
 
-        async with aiohttp.ClientSession() as session:
-            response = await session.put(
-                file_consent_card_response["uploadInfo"]["uploadUrl"],
-                data=file_bytes,
-                headers=headers,
-            )
-
-        if response.status in [200, 201]:
-            await self.file_card_handler._file_upload_complete(
-                turn_context, file_consent_card_response
-            )
-        else:
+        try:
+            async with aiohttp.ClientSession() as session:
+                async with session.put(
+                    file_consent_card_response["uploadInfo"]["uploadUrl"],
+                    data=file_bytes,
+                    headers=headers,
+                ) as response:
+                    if response.status in [200, 201]:
+                        await self.file_card_handler._file_upload_complete(
+                            turn_context, file_consent_card_response
+                        )
+                    else:
+                        await self.file_card_handler._file_upload_failed(
+                            turn_context, "Unable to upload file."
+                        )
+        except Exception as e:
+            logger.error(f"Error uploading file: {e}")
             await self.file_card_handler._file_upload_failed(
-                turn_context, "Unable to upload file."
+                turn_context, "Unable to upload file due to an error."
             )
 
     async def on_teams_file_consent_decline(
@@ -119,7 +124,7 @@ class TeamsGenieBot(TeamsActivityHandler):
             turn_context.turn_state["databricks_creds"] = user_groups[0]
         else:
             await turn_context.send_activity(
-                "Sorry, your not part of any security group for accessing Databricks. If you believe this is an error, please contact your administrator."
+                "Sorry, you're not part of any security group for accessing Databricks. If you believe this is an error, please contact your administrator."
             )
             return
 
