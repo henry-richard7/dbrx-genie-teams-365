@@ -16,6 +16,7 @@ class UserSelection(SQLModel, table=True):
     space_id: Optional[str] = Field(default=None, max_length=255)
     space_name: Optional[str] = Field(default=None, max_length=255)
     conversation_id: Optional[str] = Field(default=None, max_length=255)
+    user_group_id: Optional[str] = Field(default=None, max_length=255)
 
 
 class SecurityGroupMapping(SQLModel, table=True):

@@ -59,6 +59,20 @@ class Database:
             await session.refresh(selection)
             return selection
 
+    async def update_user_scope(self, user_id: str, user_group_id: str):
+        async with AsyncSession(self.engine) as session:
+            statement = select(UserSelection).where(UserSelection.user_id == user_id)
+            result = await session.exec(statement)
+            selection = result.first()
+            if selection:
+                selection.user_group_id = user_group_id
+                session.add(selection)
+                await session.commit()
+                await session.refresh(selection)
+                return selection
+
+        return None
+
     async def get_user_selection(self, user_id: str) -> UserSelection:
         async with AsyncSession(self.engine) as session:
             statement = select(UserSelection).where(UserSelection.user_id == user_id)
@@ -94,3 +108,11 @@ class Database:
             )
             result = await session.exec(statement)
             return result.all()
+
+    async def get_scope_details(self, user_group_id: str) -> SecurityGroupMapping:
+        async with AsyncSession(self.engine) as session:
+            statement = select(SecurityGroupMapping).where(
+                SecurityGroupMapping.group_id == user_group_id
+            )
+            result = await session.exec(statement)
+            return result.first()

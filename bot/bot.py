@@ -127,7 +127,8 @@ class TeamsGenieBot(TeamsActivityHandler):
         user_groups = await self.database.get_security_group_mapping(user_group_ids)
 
         if user_groups:
-            turn_context.turn_state["databricks_creds"] = user_groups[0]
+            turn_context.turn_state["user_groups"] = user_groups
+            # turn_context.turn_state["databricks_creds"] = user_groups[0]
         else:
             await turn_context.send_activity(
                 "Sorry, you're not part of any security group for accessing Databricks. If you believe this is an error, please contact your administrator."

@@ -1,6 +1,7 @@
 import asyncio
 from io import BytesIO
 import os
+import logging
 
 from thefuzz import fuzz
 from microsoft_agents.hosting.core import TurnContext, MessageFactory, CardFactory
@@ -16,6 +17,7 @@ from database.database import Database
 from database.db_models import UserSelection
 
 COMMAND_LIST_SPACES = "list genie spaces"
+logger = logging.getLogger(__name__)
 
 
 class MessageHandler:
@@ -41,6 +43,31 @@ class MessageHandler:
                 )
             elif not space_name:
                 await turn_context.send_activity("❌ Invalid space selection.")
+
+        elif action == "select_group":
+            await turn_context.delete_activity(turn_context.activity.reply_to_id)
+            group_index = action_data.get("group_index")
+            user_groups = turn_context.turn_state.get("user_groups", [])
+
+            if user_groups and 0 <= group_index < len(user_groups):
+                selected_group = user_groups[group_index]
+                # turn_context.turn_state["databricks_creds"] = selected_group
+                await self.database.update_user_scope(user_id, selected_group.group_id)
+                logger.info(f"User {user_id} selected group: {selected_group}")
+
+                # Clear cached spaces to ensure we fetch for the new scope
+                await self.database.clear_user_space_mappings(user_id)
+
+                response = await BotUtilities.keep_typing_while(
+                    turn_context,
+                    self.genie_list_handler.handle_list_spaces,
+                    user_id=user_id,
+                    client_id=selected_group.databricks_client_id,
+                    client_secret=selected_group.databricks_client_secret,
+                )
+                await turn_context.send_activity(response)
+            else:
+                await turn_context.send_activity("❌ Invalid group selection.")
 
         elif action == "refresh_spaces":
             await turn_context.delete_activity(turn_context.activity.reply_to_id)
@@ -120,11 +147,11 @@ class MessageHandler:
         user_selection: UserSelection,
     ):
         """Handle natural language questions to Genie."""
+        current_scope = user_selection.user_group_id
+        dbrx_creds = await self.database.get_scope_details(current_scope)
         genie = Genie(
-            client_id=turn_context.turn_state["databricks_creds"].databricks_client_id,
-            client_secret=turn_context.turn_state[
-                "databricks_creds"
-            ].databricks_client_secret,
+            client_id=dbrx_creds.databricks_client_id,
+            client_secret=dbrx_creds.databricks_client_secret,
         )
         sending_excel = False
 
@@ -213,6 +240,45 @@ class MessageHandler:
                 file_bytes=file_bytes,
             )
 
+    async def send_group_selection_card(
+        self, turn_context: TurnContext, user_groups: list
+    ):
+        """Send a card to allow user to select a security group."""
+        card_template = AdaptiveCardTemplate()
+        card_template.add_text(
+            content="🔐 Select Access Scope",
+            is_title=True,
+            color="Accent",
+        )
+        card_template.add_text(
+            content="You are a member of multiple groups. Please select which scope you want to use:",
+            is_title=False,
+        )
+
+        for index, group in enumerate(user_groups):
+            group_name = getattr(
+                group, "group_name", getattr(group, "name", f"Scope {index + 1}")
+            )
+
+            card_template.add_item(
+                {
+                    "type": "ActionSet",
+                    "actions": [
+                        {
+                            "type": "Action.Submit",
+                            "title": group_name,
+                            "data": {
+                                "action": "select_group",
+                                "group_index": index,
+                            },
+                        }
+                    ],
+                }
+            )
+
+        attachment = CardFactory.adaptive_card(card_template.get_adaptive_card())
+        await turn_context.send_activity(MessageFactory.attachment(attachment))
+
     async def process_message(self, turn_context: TurnContext):
         user_id = turn_context.activity.from_property.id
         if (
@@ -229,6 +295,13 @@ class MessageHandler:
             if (
                 fuzz.partial_ratio(text, COMMAND_LIST_SPACES) >= 70
             ):  # Use fuzzy matching to allow for minor typos
+                user_groups = turn_context.turn_state.get("user_groups", [])
+                logger.info(f"User {user_id} is in groups: {user_groups}")
+                if len(user_groups) > 1:
+                    logger.info(user_groups)
+                    await self.send_group_selection_card(turn_context, user_groups)
+                    return
+
                 response = await BotUtilities.keep_typing_while(
                     turn_context,
                     self.genie_list_handler.handle_list_spaces,
