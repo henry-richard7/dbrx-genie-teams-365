@@ -2,14 +2,20 @@
 The main module to run Teams Genie Bot
 """
 
-import pathlib
+import uvicorn
 from os import environ
 from dotenv import load_dotenv
-from aiohttp.web import Application, Request, Response, run_app
+from contextlib import asynccontextmanager
+
+from fastapi import FastAPI, Request
 
 from microsoft_agents.activity import load_configuration_from_env
 from microsoft_agents.authentication.msal import MsalConnectionManager
-from microsoft_agents.hosting.aiohttp import CloudAdapter, jwt_authorization_decorator
+from microsoft_agents.hosting.fastapi import (
+    CloudAdapter,
+    JwtAuthorizationMiddleware,
+    start_agent_process,
+)
 from microsoft_agents.hosting.core import Authorization, MemoryStorage, UserState
 
 from bot.bot import TeamsGenieBot
@@ -40,38 +46,40 @@ def create_agent():
 AGENT = create_agent()
 
 
+@asynccontextmanager
+async def lifespan(app: FastAPI):
+    """
+    Handles startup and shutdown events for the FastAPI application.
+    """
+    # on startup
+    await AGENT.database.create_tables()
+    yield
+    # on shutdown
+    await AGENT.database.close()
+
+
 # Listen for incoming requests on /api/messages
-@jwt_authorization_decorator
-async def messages(req: Request) -> Response:
+app = FastAPI(title="Authorization Agent Sample", version="1.0.0", lifespan=lifespan)
+app.state.agent_configuration = (
+    CONNECTION_MANAGER.get_default_connection_configuration()
+)
+app.add_middleware(JwtAuthorizationMiddleware)
+
+
+@app.post("/api/messages")
+async def messages(req: Request):
     """
     Handles Teams Messages.
     """
-    adapter: CloudAdapter = req.app["adapter"]
-    return await adapter.process(req, AGENT)
+    # adapter: CloudAdapter = req.app["adapter"]
+    # return await adapter.process(req, AGENT)
+    return await start_agent_process(
+        req,
+        AGENT,
+        adapter=ADAPTER,
+    )
 
-
-APP = Application()
-APP.router.add_post("/api/messages", messages)
-
-# Add static file handling for CSS, JS, etc.
-static_path = pathlib.Path(__file__).parent / "public"
-if static_path.exists():
-    APP.router.add_static("/public", static_path)
-
-APP["agent_configuration"] = CONFIG
-APP["adapter"] = ADAPTER
-
-
-async def on_startup(app):
-    await AGENT.database.create_tables()
-
-
-APP.on_startup.append(on_startup)
 
 if __name__ == "__main__":
-    try:
-        PORT = CONFIG.PORT
-        print(f"\nServer listening on port {PORT} for appId {CONFIG.CLIENT_ID}")
-        run_app(APP, host="localhost", port=PORT)
-    except Exception as error:
-        raise error
+    port = int(environ.get("PORT", 3978))
+    uvicorn.run(app, host="0.0.0.0", port=port)

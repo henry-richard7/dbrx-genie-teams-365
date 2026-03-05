@@ -28,12 +28,16 @@ class Genie:
     def workspace_client(self) -> WorkspaceClient:
         """Lazy initialization of workspace client."""
         if self._workspace_client is None:
-            self._workspace_client = WorkspaceClient(
-                host=self._databricks_host,
-                # token=self._databricks_token,
-                client_id=self._client_id,
-                client_secret=self._client_secret,
-            )
+            if self._databricks_token:
+                self._workspace_client = WorkspaceClient(
+                    host=self._databricks_host, token=self._databricks_token
+                )
+            else:
+                self._workspace_client = WorkspaceClient(
+                    host=self._databricks_host,
+                    client_id=self._client_id,
+                    client_secret=self._client_secret,
+                )
         return self._workspace_client
 
     @property

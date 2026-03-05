@@ -13,9 +13,11 @@ dependencies = [
     "microsoft-agents-authentication-msal>=0.7.0",
     "microsoft-agents-hosting-aiohttp>=0.7.0",
     "microsoft-agents-hosting-core>=0.7.0",
+    "microsoft-agents-hosting-fastapi>=0.7.0",
     "microsoft-agents-hosting-teams>=0.7.0",
     "polars>=1.38.1",
     "sqlmodel>=0.0.32",
     "thefuzz>=0.22.1",
+    "uvicorn>=0.41.0",
     "xlsxwriter>=3.2.9",
 ]

@@ -17,7 +17,7 @@ class GenieListHandler:
         self.db = database
 
     async def handle_list_spaces(
-        self, user_id: str, client_id: str, client_secret: str
+        self, user_id: str, client_id: str = None, client_secret: str = None
     ) -> Activity:
         """Handle request to list available spaces with enhanced formatting and inline buttons."""
         try:

@@ -51,7 +51,7 @@ class MessageHandler:
 
             if user_groups and 0 <= group_index < len(user_groups):
                 selected_group = user_groups[group_index]
-                # turn_context.turn_state["databricks_creds"] = selected_group
+                turn_context.turn_state["databricks_creds"] = selected_group
                 await self.database.update_user_scope(user_id, selected_group.group_id)
                 logger.info(f"User {user_id} selected group: {selected_group}")
 
@@ -75,32 +75,36 @@ class MessageHandler:
                 user_id
             )  # Clear cached spaces for the user
 
-            # Fetch spaces again
+            list_spaces_kwargs = {"user_id": user_id}
+            if not os.environ.get("DATABRICKS_TOKEN"):
+                creds = turn_context.turn_state.get("databricks_creds")
+                if not creds:
+                    await turn_context.send_activity("Error: Credentials not found.")
+                    return
+                list_spaces_kwargs["client_id"] = creds.databricks_client_id
+                list_spaces_kwargs["client_secret"] = creds.databricks_client_secret
+
             response = await BotUtilities.keep_typing_while(
                 turn_context,
                 self.genie_list_handler.handle_list_spaces,
-                user_id=user_id,
-                client_id=turn_context.turn_state[
-                    "databricks_creds"
-                ].databricks_client_id,
-                client_secret=turn_context.turn_state[
-                    "databricks_creds"
-                ].databricks_client_secret,
+                **list_spaces_kwargs,
             )
             await turn_context.send_activity(response)
 
         elif action == "retry_spaces":
-            # Retry fetching spaces
+            list_spaces_kwargs = {"user_id": user_id}
+            if not os.environ.get("DATABRICKS_TOKEN"):
+                creds = turn_context.turn_state.get("databricks_creds")
+                if not creds:
+                    await turn_context.send_activity("Error: Credentials not found.")
+                    return
+                list_spaces_kwargs["client_id"] = creds.databricks_client_id
+                list_spaces_kwargs["client_secret"] = creds.databricks_client_secret
+
             response = await BotUtilities.keep_typing_while(
                 turn_context,
                 self.genie_list_handler.handle_list_spaces,
-                user_id=user_id,
-                client_id=turn_context.turn_state[
-                    "databricks_creds"
-                ].databricks_client_id,
-                client_secret=turn_context.turn_state[
-                    "databricks_creds"
-                ].databricks_client_secret,
+                **list_spaces_kwargs,
             )
             await turn_context.send_activity(response)
 
@@ -147,12 +151,20 @@ class MessageHandler:
         user_selection: UserSelection,
     ):
         """Handle natural language questions to Genie."""
-        current_scope = user_selection.user_group_id
-        dbrx_creds = await self.database.get_scope_details(current_scope)
-        genie = Genie(
-            client_id=dbrx_creds.databricks_client_id,
-            client_secret=dbrx_creds.databricks_client_secret,
-        )
+        if os.environ.get("DATABRICKS_TOKEN"):
+            genie = Genie()
+        else:
+            current_scope = user_selection.user_group_id
+            dbrx_creds = await self.database.get_scope_details(current_scope)
+            if not dbrx_creds:
+                await turn_context.send_activity(
+                    "Error: Could not determine access scope. Please try `list genie spaces` again."
+                )
+                return
+            genie = Genie(
+                client_id=dbrx_creds.databricks_client_id,
+                client_secret=dbrx_creds.databricks_client_secret,
+            )
         sending_excel = False
 
         async def ask():
@@ -292,26 +304,34 @@ class MessageHandler:
             # This is a regular message, process commands
             text = turn_context.activity.text.strip().lower()
 
-            if (
-                fuzz.partial_ratio(text, COMMAND_LIST_SPACES) >= 70
-            ):  # Use fuzzy matching to allow for minor typos
-                user_groups = turn_context.turn_state.get("user_groups", [])
-                logger.info(f"User {user_id} is in groups: {user_groups}")
-                if len(user_groups) > 1:
-                    logger.info(user_groups)
-                    await self.send_group_selection_card(turn_context, user_groups)
-                    return
+            if fuzz.partial_ratio(text, COMMAND_LIST_SPACES) >= 70:
+                # Use fuzzy matching to allow for minor typos
+                list_spaces_kwargs = {"user_id": user_id}
+                if not os.environ.get("DATABRICKS_TOKEN"):
+                    user_groups = turn_context.turn_state.get("user_groups", [])
+                    logger.info(f"User {user_id} is in groups: {user_groups}")
+                    if (
+                        len(user_groups) > 1
+                        and "databricks_creds" not in turn_context.turn_state
+                    ):
+                        logger.info(user_groups)
+                        await self.send_group_selection_card(turn_context, user_groups)
+                        return
+
+                    creds = turn_context.turn_state.get("databricks_creds")
+                    if not creds:
+                        await turn_context.send_activity(
+                            "Could not determine credentials."
+                        )
+                        return
+
+                    list_spaces_kwargs["client_id"] = creds.databricks_client_id
+                    list_spaces_kwargs["client_secret"] = creds.databricks_client_secret
 
                 response = await BotUtilities.keep_typing_while(
                     turn_context,
                     self.genie_list_handler.handle_list_spaces,
-                    user_id=user_id,
-                    client_id=turn_context.turn_state[
-                        "databricks_creds"
-                    ].databricks_client_id,
-                    client_secret=turn_context.turn_state[
-                        "databricks_creds"
-                    ].databricks_client_secret,
+                    **list_spaces_kwargs,
                 )
                 await turn_context.send_activity(response)
             else:

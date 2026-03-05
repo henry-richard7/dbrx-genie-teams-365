@@ -13,6 +13,9 @@ class Database:
         async with self.engine.begin() as conn:
             await conn.run_sync(SQLModel.metadata.create_all)
 
+    async def close(self):
+        await self.engine.dispose()
+
     async def get_user_space_mappings(self, user_id: str) -> List[GenieSpace]:
         async with AsyncSession(self.engine) as session:
             statement = select(GenieSpace).where(GenieSpace.user_id == user_id)

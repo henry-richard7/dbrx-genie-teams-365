@@ -2,6 +2,7 @@
 This module contains the Bot logic.
 """
 
+from os import environ
 import base64
 import logging
 import aiohttp
@@ -112,6 +113,11 @@ class TeamsGenieBot(TeamsActivityHandler):
         await turn_context.send_activity(reply)
 
     async def on_message_activity(self, turn_context: TurnContext):
+        if environ.get("DATABRICKS_TOKEN"):
+            # If a global Databricks token is provided, bypass group-based access control.
+            await self.message_handler.process_message(turn_context)
+            return
+
         try:
             members = await TeamsInfo.get_member(
                 turn_context, turn_context.activity.from_property.id
@@ -128,7 +134,7 @@ class TeamsGenieBot(TeamsActivityHandler):
 
         if user_groups:
             turn_context.turn_state["user_groups"] = user_groups
-            # turn_context.turn_state["databricks_creds"] = user_groups[0]
+            turn_context.turn_state["databricks_creds"] = user_groups[0]
         else:
             await turn_context.send_activity(
                 "Sorry, you're not part of any security group for accessing Databricks. If you believe this is an error, please contact your administrator."
