@@ -1,22 +1,22 @@
 [project]
 name = "dbrx-genie-teams-365"
 version = "0.1.0"
-description = "Add your description here"
+description = "A Microsoft Teams agent that can interact with Databricks and other services to provide insights and assistance to users."
 readme = "README.md"
 requires-python = ">=3.13"
 dependencies = [
     "aiosqlite>=0.22.1",
-    "databricks-sdk>=0.85.0",
+    "databricks-langchain>=0.16.1",
+    "databricks-sdk>=0.96.0",
     "dotenv>=0.9.9",
-    "langchain>=1.2.9",
-    "microsoft-agents-activity>=0.7.0",
-    "microsoft-agents-authentication-msal>=0.7.0",
-    "microsoft-agents-hosting-aiohttp>=0.7.0",
-    "microsoft-agents-hosting-core>=0.7.0",
-    "microsoft-agents-hosting-fastapi>=0.7.0",
-    "microsoft-agents-hosting-teams>=0.7.0",
+    "langchain>=1.2.10",
+    "microsoft-agents-activity>=0.8.0",
+    "microsoft-agents-authentication-msal>=0.8.0",
+    "microsoft-agents-hosting-core>=0.8.0",
+    "microsoft-agents-hosting-fastapi>=0.8.0",
+    "microsoft-agents-hosting-teams>=0.8.0",
     "polars>=1.38.1",
-    "sqlmodel>=0.0.32",
+    "sqlmodel>=0.0.37",
     "thefuzz>=0.22.1",
     "uvicorn>=0.41.0",
     "xlsxwriter>=3.2.9",

@@ -15,6 +15,7 @@ from handlers.genie_list_handler import GenieListHandler
 from handlers.file_card_handler import FileCardHandler
 from database.database import Database
 from database.db_models import UserSelection
+from utils.llm_summarizer import LlmSummarizer
 
 COMMAND_LIST_SPACES = "list genie spaces"
 logger = logging.getLogger(__name__)
@@ -27,6 +28,7 @@ class MessageHandler:
         self.database = database
         self.genie_list_handler = GenieListHandler(database)
         self.file_card_handler = FileCardHandler()
+        self.llm_summarizer = LlmSummarizer()
 
     async def handle_card_action(
         self, turn_context: TurnContext, user_id: str, action_data: dict
@@ -209,6 +211,18 @@ class MessageHandler:
             card.add_text(genie_response["query_description"])
 
         if "data" in genie_response and "columns" in genie_response:
+            # Generate summary
+            try:
+                summary = await asyncio.to_thread(
+                    self.llm_summarizer.summarize,
+                    genie_response["columns"]["columns"],
+                    genie_response["data"]["data_array"],
+                    question,
+                )
+                card.add_text(summary)
+            except Exception as e:
+                logger.error(f"Failed to generate summary: {e}")
+
             if genie_response["data"]["row_count"] < 100:
                 card.add_query_result_table(
                     genie_response["columns"], genie_response["data"]
