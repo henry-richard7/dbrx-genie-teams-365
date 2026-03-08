@@ -3,7 +3,7 @@ import logging
 from os import environ
 
 from dotenv import load_dotenv
-from databricks_langchain import ChatDatabricks
+from langchain_openai import ChatOpenAI
 import pandas as pd
 
 load_dotenv()
@@ -38,7 +38,7 @@ class LlmSummarizer:
 
         return df.to_string(index=False)
 
-    def summarize(self, columns, data, question):
+    def summarize(self, columns, data, question, client_id=None, client_secret=None):
         """Summarizes the given dataset using a chat model.
 
         Args:
@@ -50,7 +50,43 @@ class LlmSummarizer:
             str: A concise summary of the dataset based on the user query.
         """
 
-        model = ChatDatabricks(endpoint=llm_endpoint, temperature=0.1)
+        kwargs = {
+            "model": llm_endpoint,
+            "temperature": 0.1,
+        }
+
+        base_url = environ.get("model_base_url")
+        if base_url:
+            kwargs["base_url"] = base_url
+
+        kwargs["api_key"] = environ.get("OPENAI_API_KEY", "not-provided")
+
+        if client_id and client_secret:
+            logger.debug(f"Initializing ChatOpenAI with client_id: {client_id}")
+            from databricks.sdk import WorkspaceClient
+            import os
+
+            # Use databricks sdk to configure the workspace client directly
+            host = environ.get(
+                "DATABRICKS_HOST",
+            )
+
+            try:
+                # Initialize WorkspaceClient to get token for AI Gateway
+                w = WorkspaceClient(
+                    host=host, client_id=client_id, client_secret=client_secret
+                )
+                creds = w.config.authenticate()
+                if creds:
+                    kwargs["api_key"] = creds.get("Authorization").replace(
+                        "Bearer ", ""
+                    )
+            except Exception as e:
+                logger.error(f"Error initializing Databricks WorkspaceClient: {e}")
+        else:
+            logger.debug("Initializing ChatOpenAI without explicit client credentials")
+
+        model = ChatOpenAI(**kwargs)
         df = pd.DataFrame(data, columns=[col["name"] for col in columns])
 
         table_text = self.dataframe_to_text(df)

@@ -264,11 +264,25 @@ class MessageHandler:
             # Generate summary
             try:
                 logger.debug("Generating summary from data via llm_summarizer.")
+
+                client_id = None
+                client_secret = None
+                if not os.environ.get("DATABRICKS_TOKEN"):
+                    # user's scope dbrx_creds should be defined from earlier in handle_genie_question
+                    dbrx_creds = getattr(
+                        turn_context.turn_state, "get", lambda x, y=None: None
+                    )("databricks_creds")
+                    if dbrx_creds:
+                        client_id = dbrx_creds.databricks_client_id
+                        client_secret = dbrx_creds.databricks_client_secret
+
                 summary = await asyncio.to_thread(
                     self.llm_summarizer.summarize,
                     genie_response["columns"]["columns"],
                     genie_response["data"]["data_array"],
                     question,
+                    client_id,
+                    client_secret,
                 )
                 card.add_text(summary)
             except Exception as e:

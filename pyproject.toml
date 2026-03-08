@@ -7,10 +7,10 @@ requires-python = ">=3.13"
 dependencies = [
     "aiosqlite>=0.22.1",
     "asyncmy>=0.2.11",
-    "databricks-langchain>=0.16.1",
     "databricks-sdk>=0.96.0",
     "dotenv>=0.9.9",
     "langchain>=1.2.10",
+    "langchain-openai>=1.1.10",
     "microsoft-agents-activity>=0.8.0",
     "microsoft-agents-authentication-msal>=0.8.0",
     "microsoft-agents-hosting-core>=0.8.0",
