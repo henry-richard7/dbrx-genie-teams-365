@@ -35,18 +35,26 @@ class MessageHandler:
     ):
         """Handle actions from adaptive card buttons."""
         action = action_data.get("action")
+        logger.info(
+            f"handle_card_action triggered for user: {user_id}, action: {action}"
+        )
 
         if action == "select_space":
             space_name = action_data.get("space_name")
             space_id = action_data.get("space_id")
+            logger.debug(
+                f"Action 'select_space' details: name={space_name}, id={space_id}"
+            )
             if space_name and space_id:
                 await self.handle_space_selection(
                     turn_context, user_id, space_id, space_name
                 )
             elif not space_name:
+                logger.warning("Invalid space selection: missing space_name")
                 await turn_context.send_activity("❌ Invalid space selection.")
 
         elif action == "select_group":
+            logger.debug("Handling 'select_group' action.")
             await turn_context.delete_activity(turn_context.activity.reply_to_id)
             group_index = action_data.get("group_index")
             user_groups = turn_context.turn_state.get("user_groups", [])
@@ -55,9 +63,12 @@ class MessageHandler:
                 selected_group = user_groups[group_index]
                 turn_context.turn_state["databricks_creds"] = selected_group
                 await self.database.update_user_scope(user_id, selected_group.group_id)
-                logger.info(f"User {user_id} selected group: {selected_group}")
+                logger.info(
+                    f"User {user_id} successfully selected group: {getattr(selected_group, 'group_name', selected_group.group_id)}"
+                )
 
                 # Clear cached spaces to ensure we fetch for the new scope
+                logger.debug(f"Clearing cached spaces for user {user_id}")
                 await self.database.clear_user_space_mappings(user_id)
 
                 response = await BotUtilities.keep_typing_while(
@@ -69,10 +80,15 @@ class MessageHandler:
                 )
                 await turn_context.send_activity(response)
             else:
+                logger.warning(
+                    f"Invalid group selection. Index: {group_index}, User groups len: {len(user_groups) if user_groups else 0}"
+                )
                 await turn_context.send_activity("❌ Invalid group selection.")
 
         elif action == "refresh_spaces":
+            logger.debug("Handling 'refresh_spaces' action.")
             await turn_context.delete_activity(turn_context.activity.reply_to_id)
+            logger.debug(f"Clearing cached spaces for user {user_id}")
             await self.database.clear_user_space_mappings(
                 user_id
             )  # Clear cached spaces for the user
@@ -81,6 +97,7 @@ class MessageHandler:
             if not os.environ.get("DATABRICKS_TOKEN"):
                 creds = turn_context.turn_state.get("databricks_creds")
                 if not creds:
+                    logger.error("Credentials not found during refresh_spaces.")
                     await turn_context.send_activity("Error: Credentials not found.")
                     return
                 list_spaces_kwargs["client_id"] = creds.databricks_client_id
@@ -134,12 +151,16 @@ class MessageHandler:
         self, turn_context: TurnContext, user_id: str, space_id: str, space_name: str
     ):
         """Save the user's space selection."""
+        logger.info(
+            f"handle_space_selection triggered for user: {user_id}, space: {space_name} ({space_id})"
+        )
         await self.database.update_user_selection(
             user_id=user_id,
             space_id=space_id,
             space_name=space_name,
             conversation_id=None,
         )
+        logger.debug("User selection updated in database.")
         await turn_context.delete_activity(turn_context.activity.reply_to_id)
         await turn_context.send_activity(
             f"✅ Selected space: **{space_name}**. You can now ask questions!"
@@ -153,12 +174,20 @@ class MessageHandler:
         user_selection: UserSelection,
     ):
         """Handle natural language questions to Genie."""
+        logger.info(
+            f"handle_genie_question triggered for user: {user_id}, question: '{question}'"
+        )
         if os.environ.get("DATABRICKS_TOKEN"):
+            logger.debug("Using global DATABRICKS_TOKEN to initialize Genie.")
             genie = Genie()
         else:
             current_scope = user_selection.user_group_id
+            logger.debug(f"Retrieving scope details for group ID: {current_scope}")
             dbrx_creds = await self.database.get_scope_details(current_scope)
             if not dbrx_creds:
+                logger.error(
+                    f"Could not determine access scope for group ID: {current_scope}"
+                )
                 await turn_context.send_activity(
                     "Error: Could not determine access scope. Please try `list genie spaces` again."
                 )
@@ -170,15 +199,20 @@ class MessageHandler:
         sending_excel = False
 
         async def ask():
+            logger.debug(
+                f"Sending question to Genie. Space ID: {user_selection.space_id}, Conversation ID: {user_selection.conversation_id}"
+            )
             return await genie.ask_genie(
                 question=question,
                 space_id=user_selection.space_id,
                 conversation_id=user_selection.conversation_id,
             )
 
+        logger.debug("Waiting for Genie response...")
         response_data = await BotUtilities.keep_typing_while(turn_context, ask)
 
         if "error" in response_data:
+            logger.warning(f"Genie returned an error: {response_data['error']}")
             await turn_context.send_activity(f"❌ {response_data['error']}")
             return
 
@@ -188,6 +222,9 @@ class MessageHandler:
             new_conversation_id
             and new_conversation_id != user_selection.conversation_id
         ):
+            logger.debug(
+                f"Updating conversation ID for user {user_id} to {new_conversation_id}"
+            )
             await self.database.update_user_selection(
                 user_id,
                 user_selection.space_id,
@@ -197,6 +234,7 @@ class MessageHandler:
 
         # Process response
         genie_response = response_data.get("response", {})
+        logger.debug("Processing Genie response.")
 
         # If it's just text
         if "message" in genie_response and not genie_response.get("data"):
@@ -213,6 +251,7 @@ class MessageHandler:
         if "data" in genie_response and "columns" in genie_response:
             # Generate summary
             try:
+                logger.debug("Generating summary from data via llm_summarizer.")
                 summary = await asyncio.to_thread(
                     self.llm_summarizer.summarize,
                     genie_response["columns"]["columns"],
@@ -221,49 +260,54 @@ class MessageHandler:
                 )
                 card.add_text(summary)
             except Exception as e:
-                logger.error(f"Failed to generate summary: {e}")
+                logger.error(f"Failed to generate summary: {e}", exc_info=True)
 
-            if genie_response["data"]["row_count"] < 100:
+            row_count = genie_response["data"]["row_count"]
+            logger.debug(f"Data row count: {row_count}")
+
+            if row_count < 100:
+                logger.debug("Row count < 100, adding table to Adaptive Card.")
                 card.add_query_result_table(
                     genie_response["columns"], genie_response["data"]
                 )
             else:
-                # For large datasets, we could add a button to download the results as CSV/Excel
+                # For large datasets, we add a button to download the results as CSV/Excel
+                # Generate Excel in memory to avoid disk I/O
+                logger.debug("Row count >= 100, preparing Excel file for upload.")
                 sending_excel = True
-                os.makedirs("temp", exist_ok=True)
-                filename = f"temp/{uuid4()}.xlsx"
 
-                def save_excel_sync(rows, schema, fname):
-                    df = polars.DataFrame(data=rows, schema=schema, orient="row")
-                    df.write_excel(fname)
-
-                await asyncio.to_thread(
-                    save_excel_sync,
-                    genie_response["data"]["data_array"],
-                    [col["name"] for col in genie_response["columns"]["columns"]],
-                    filename,
+                # Create the dataframe
+                logger.debug("Creating Polars DataFrame.")
+                df = polars.DataFrame(
+                    data=genie_response["data"]["data_array"],
+                    schema=[
+                        col["name"] for col in genie_response["columns"]["columns"]
+                    ],
+                    orient="row",
                 )
 
+                # Write to in-memory buffer
+                excel_buffer = BytesIO()
+                df.write_excel(excel_buffer)
+                excel_buffer.seek(0)
+
+                filename = f"{uuid4()}.xlsx"
+
         if "query" in genie_response:
+            logger.debug("Adding SQL query to Adaptive Card.")
             card.add_sql_code(genie_response["query"])
 
+        logger.debug("Sending Adaptive Card response to user.")
         attachment = CardFactory.adaptive_card(card.get_adaptive_card())
         await turn_context.send_activity(MessageFactory.attachment(attachment))
 
-        def upload_file_and_send_card():
-            with open(filename, "rb") as f:
-                content = BytesIO(f.read())
-            os.remove(filename)
-            return content
-
         if sending_excel:
-
-            file_bytes = await asyncio.to_thread(upload_file_and_send_card)
+            logger.info(f"Sending Excel file card for {filename}")
             await self.file_card_handler.send_file_card(
                 turn_context,
-                filename=filename.split("/")[-1],
-                file_size=file_bytes.getbuffer().nbytes,
-                file_bytes=file_bytes,
+                filename=filename,
+                file_size=excel_buffer.getbuffer().nbytes,
+                file_bytes=excel_buffer,
             )
 
     async def send_group_selection_card(
@@ -307,9 +351,13 @@ class MessageHandler:
 
     async def process_message(self, turn_context: TurnContext):
         user_id = turn_context.activity.from_property.id
+        logger.info(f"process_message triggered for user: {user_id}")
         if (
             turn_context.activity.value is not None
         ):  # This indicates a card action response
+            logger.debug(
+                "Message contains 'value' payload. Delegating to handle_card_action."
+            )
             await self.handle_card_action(
                 turn_context, user_id, turn_context.activity.value
             )
@@ -317,23 +365,32 @@ class MessageHandler:
         else:
             # This is a regular message, process commands
             text = turn_context.activity.text.strip().lower()
+            logger.debug(f"Processing regular text message: '{text}'")
 
             if fuzz.partial_ratio(text, COMMAND_LIST_SPACES) >= 70:
                 # Use fuzzy matching to allow for minor typos
+                logger.debug(
+                    f"Text matches '{COMMAND_LIST_SPACES}' command. Fuzzy ratio: {fuzz.partial_ratio(text, COMMAND_LIST_SPACES)}"
+                )
                 list_spaces_kwargs = {"user_id": user_id}
                 if not os.environ.get("DATABRICKS_TOKEN"):
                     user_groups = turn_context.turn_state.get("user_groups", [])
-                    logger.info(f"User {user_id} is in groups: {user_groups}")
+                    logger.debug(f"User {user_id} is in groups: {user_groups}")
                     if (
                         len(user_groups) > 1
                         and "databricks_creds" not in turn_context.turn_state
                     ):
-                        logger.info(user_groups)
+                        logger.info(
+                            f"User is in multiple groups, prompting for scope selection."
+                        )
                         await self.send_group_selection_card(turn_context, user_groups)
                         return
 
                     creds = turn_context.turn_state.get("databricks_creds")
                     if not creds:
+                        logger.error(
+                            "Could not determine credentials for list spaces command."
+                        )
                         await turn_context.send_activity(
                             "Could not determine credentials."
                         )
@@ -342,6 +399,7 @@ class MessageHandler:
                     list_spaces_kwargs["client_id"] = creds.databricks_client_id
                     list_spaces_kwargs["client_secret"] = creds.databricks_client_secret
 
+                logger.debug("Calling GenieListHandler to fetching spaces.")
                 response = await BotUtilities.keep_typing_while(
                     turn_context,
                     self.genie_list_handler.handle_list_spaces,
@@ -350,12 +408,17 @@ class MessageHandler:
                 await turn_context.send_activity(response)
             else:
                 # Check if user has a space selected
+                logger.debug("Checking if user has an active Genie space selected.")
                 user_selection = await self.database.get_user_selection(user_id)
                 if user_selection and user_selection.space_id:
+                    logger.info(
+                        f"User has selected scope {user_selection.space_id}. Delegating to handle_genie_question."
+                    )
                     await self.handle_genie_question(
                         turn_context, user_id, text, user_selection
                     )
                 else:
+                    logger.info("User requested a question but has no scope selected.")
                     await turn_context.send_activity(
                         "Please select a Genie space first by typing 'list genie spaces'."
                     )
