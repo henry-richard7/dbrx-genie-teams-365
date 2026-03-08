@@ -6,6 +6,7 @@ readme = "README.md"
 requires-python = ">=3.13"
 dependencies = [
     "aiosqlite>=0.22.1",
+    "asyncmy>=0.2.11",
     "databricks-langchain>=0.16.1",
     "databricks-sdk>=0.96.0",
     "dotenv>=0.9.9",

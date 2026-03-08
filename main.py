@@ -2,6 +2,7 @@
 The main module to run Teams Genie Bot
 """
 
+import logging
 import uvicorn
 from os import environ
 from dotenv import load_dotenv
@@ -22,6 +23,15 @@ from bot.bot import TeamsGenieBot
 from config import DefaultConfig
 
 load_dotenv()
+
+logging.basicConfig(
+    level=(
+        logging.DEBUG
+        if environ.get("DEBUG", "true").lower() == "true"
+        else logging.INFO
+    ),
+    format="%(asctime)s - %(name)s - %(levelname)s - %(message)s",
+)
 
 CONFIG = DefaultConfig()
 

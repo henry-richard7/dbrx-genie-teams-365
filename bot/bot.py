@@ -165,11 +165,31 @@ class TeamsGenieBot(TeamsActivityHandler):
         user_groups = await self.database.get_security_group_mapping(user_group_ids)
 
         if user_groups:
-            logger.info(
-                f"User mapped to {len(user_groups)} groups. Setting default creds to: {user_groups[0].group_name if hasattr(user_groups[0], 'group_name') else user_groups[0].group_id}"
-            )
             turn_context.turn_state["user_groups"] = user_groups
-            turn_context.turn_state["databricks_creds"] = user_groups[0]
+
+            user_id = turn_context.activity.from_property.id
+            user_selection = await self.database.get_user_selection(user_id)
+            selected_group = None
+            if user_selection and getattr(user_selection, "user_group_id", None):
+                for group in user_groups:
+                    if group.group_id == user_selection.user_group_id:
+                        selected_group = group
+                        break
+
+            if selected_group:
+                logger.info(
+                    f"User mapped to {len(user_groups)} groups. Setting creds to previously selected group: {getattr(selected_group, 'group_name', selected_group.group_id)}"
+                )
+                turn_context.turn_state["databricks_creds"] = selected_group
+            elif len(user_groups) == 1:
+                logger.info(
+                    f"User mapped to 1 group. Setting default creds to: {getattr(user_groups[0], 'group_name', user_groups[0].group_id)}"
+                )
+                turn_context.turn_state["databricks_creds"] = user_groups[0]
+            else:
+                logger.info(
+                    f"User mapped to {len(user_groups)} groups. Prompts will occur in message handler."
+                )
         else:
             logger.warning(
                 f"User {user_email} is not part of any configured security group."

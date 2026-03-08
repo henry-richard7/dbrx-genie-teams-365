@@ -17,7 +17,11 @@ class GenieListHandler:
         self.db = database
 
     async def handle_list_spaces(
-        self, user_id: str, client_id: str = None, client_secret: str = None
+        self,
+        user_id: str,
+        client_id: str = None,
+        client_secret: str = None,
+        scope_name: str = None,
     ) -> Activity:
         """Handle request to list available spaces with enhanced formatting and inline buttons."""
         try:
@@ -46,7 +50,7 @@ class GenieListHandler:
             card_template_genie_list = AdaptiveCardTemplate()
 
             card_template_genie_list.add_text(
-                content="🔍 Available Genie Spaces",
+                content=f"🔍 Available Genie Spaces{f' for **{scope_name}**' if scope_name else ''}",
                 is_title=True,
                 color="Accent",
             )

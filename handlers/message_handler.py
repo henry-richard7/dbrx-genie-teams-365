@@ -77,6 +77,9 @@ class MessageHandler:
                     user_id=user_id,
                     client_id=selected_group.databricks_client_id,
                     client_secret=selected_group.databricks_client_secret,
+                    scope_name=getattr(
+                        selected_group, "group_name", selected_group.group_id
+                    ),
                 )
                 await turn_context.send_activity(response)
             else:
@@ -102,6 +105,9 @@ class MessageHandler:
                     return
                 list_spaces_kwargs["client_id"] = creds.databricks_client_id
                 list_spaces_kwargs["client_secret"] = creds.databricks_client_secret
+                list_spaces_kwargs["scope_name"] = getattr(
+                    creds, "group_name", creds.group_id
+                )
 
             response = await BotUtilities.keep_typing_while(
                 turn_context,
@@ -119,6 +125,9 @@ class MessageHandler:
                     return
                 list_spaces_kwargs["client_id"] = creds.databricks_client_id
                 list_spaces_kwargs["client_secret"] = creds.databricks_client_secret
+                list_spaces_kwargs["scope_name"] = getattr(
+                    creds, "group_name", creds.group_id
+                )
 
             response = await BotUtilities.keep_typing_while(
                 turn_context,
@@ -181,16 +190,19 @@ class MessageHandler:
             logger.debug("Using global DATABRICKS_TOKEN to initialize Genie.")
             genie = Genie()
         else:
-            current_scope = user_selection.user_group_id
-            logger.debug(f"Retrieving scope details for group ID: {current_scope}")
-            dbrx_creds = await self.database.get_scope_details(current_scope)
+            dbrx_creds = turn_context.turn_state.get("databricks_creds")
             if not dbrx_creds:
-                logger.error(
-                    f"Could not determine access scope for group ID: {current_scope}"
-                )
-                await turn_context.send_activity(
-                    "Error: Could not determine access scope. Please try `list genie spaces` again."
-                )
+                user_groups = turn_context.turn_state.get("user_groups", [])
+                if len(user_groups) > 1:
+                    logger.info(
+                        "User requested to ask a question but has not selected a scope yet."
+                    )
+                    await self.send_group_selection_card(turn_context, user_groups)
+                else:
+                    logger.error("Could not determine access scope.")
+                    await turn_context.send_activity(
+                        "Error: Could not determine access scope. Please try `list genie spaces` again."
+                    )
                 return
             genie = Genie(
                 client_id=dbrx_creds.databricks_client_id,
@@ -376,10 +388,7 @@ class MessageHandler:
                 if not os.environ.get("DATABRICKS_TOKEN"):
                     user_groups = turn_context.turn_state.get("user_groups", [])
                     logger.debug(f"User {user_id} is in groups: {user_groups}")
-                    if (
-                        len(user_groups) > 1
-                        and "databricks_creds" not in turn_context.turn_state
-                    ):
+                    if len(user_groups) > 1:
                         logger.info(
                             f"User is in multiple groups, prompting for scope selection."
                         )
@@ -398,6 +407,9 @@ class MessageHandler:
 
                     list_spaces_kwargs["client_id"] = creds.databricks_client_id
                     list_spaces_kwargs["client_secret"] = creds.databricks_client_secret
+                    list_spaces_kwargs["scope_name"] = getattr(
+                        creds, "group_name", creds.group_id
+                    )
 
                 logger.debug("Calling GenieListHandler to fetching spaces.")
                 response = await BotUtilities.keep_typing_while(
