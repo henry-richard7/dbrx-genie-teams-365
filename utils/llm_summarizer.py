@@ -4,7 +4,7 @@ from os import environ
 
 from dotenv import load_dotenv
 from langchain_openai import ChatOpenAI
-import pandas as pd
+import polars as pl
 
 load_dotenv()
 logger = logging.getLogger(__name__)
@@ -16,27 +16,27 @@ llm_endpoint = environ.get(
 class LlmSummarizer:
     """LlmSummarizer: Generates concise summaries from datasets using a language model.
 
-    This class provides a method to convert a pandas DataFrame into a textual summary
+    This class provides a method to convert a polars DataFrame into a textual summary
     and another method to generate a summary from structured data using a language model.
     """
 
     @staticmethod
-    def dataframe_to_text(df: pd.DataFrame) -> str:
-        """Convert a pandas DataFrame to a string representation without the index.
+    def dataframe_to_text(df: pl.DataFrame) -> str:
+        """Convert a polars DataFrame to a string representation.
 
         Parameters:
-        df (pd.DataFrame): The DataFrame to be converted.
+        df (pl.DataFrame): The DataFrame to be converted.
 
         Returns:
-        str: A string representation of the DataFrame, excluding the index.
-
-        Example:
-        >>> df = pd.DataFrame({'A': [1, 2], 'B': [3, 4]})
-        >>> dataframe_to_text(df)
-        'A    B\n--- ----\n1    3\n2    4
+        str: A string representation of the DataFrame.
         """
-
-        return df.to_string(index=False)
+        with pl.Config(
+            tbl_rows=-1,
+            tbl_cols=-1,
+            tbl_hide_dataframe_shape=True,
+            tbl_hide_column_data_types=True,
+        ):
+            return str(df)
 
     def summarize(self, columns, data, question, client_id=None, client_secret=None):
         """Summarizes the given dataset using a chat model.
@@ -61,10 +61,13 @@ class LlmSummarizer:
 
         kwargs["api_key"] = environ.get("OPENAI_API_KEY", "not-provided")
 
-        if client_id and client_secret:
+        use_databricks_model = (
+            environ.get("use_databricks_model", "false").lower() == "true"
+        )
+
+        if use_databricks_model and client_id and client_secret:
             logger.debug(f"Initializing ChatOpenAI with client_id: {client_id}")
             from databricks.sdk import WorkspaceClient
-            import os
 
             # Use databricks sdk to configure the workspace client directly
             host = environ.get(
@@ -87,7 +90,7 @@ class LlmSummarizer:
             logger.debug("Initializing ChatOpenAI without explicit client credentials")
 
         model = ChatOpenAI(**kwargs)
-        df = pd.DataFrame(data, columns=[col["name"] for col in columns])
+        df = pl.DataFrame(data, schema=[col["name"] for col in columns], orient="row")
 
         table_text = self.dataframe_to_text(df)
 
