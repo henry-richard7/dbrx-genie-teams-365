@@ -92,6 +92,15 @@ DATABRICKS_CLIENT_SECRET=<Databricks Oauth Client Secret>
 DATABASE_URL=postgresql+asyncpg://user:pass@host/dbname
 ```
 
+### 🔐 Setting up Databricks OAuth via Azure Security Groups
+
+This bot is designed for enterprise multi-tenant environments. Instead of using a single global Databricks Personal Access Token, it uses **Databricks OAuth for Service Principals** tied to your Azure active directory:
+
+1.  **Create Security Groups in Azure**: In Microsoft Entra ID (Azure AD), create security groups for different sets of users (e.g., `Finance-Data-Access`, `Marketing-Data-Access`).
+2.  **Create Databricks Service Principals**: In your Databricks workspace, create a Service Principal for each environment and generate its OAuth Client ID and Secret.
+3.  **Map in Database**: Insert records into the `SecurityGroupMapping` database table mapping the Azure AD Group Object ID to the corresponding Databricks Service Principal's OAuth credentials.
+4.  **How it Works**: When a user messages the bot, the Microsoft Graph API dynamically resolves their group memberships. The bot matches these against the `SecurityGroupMapping` table, granting them scoped Databricks access through the exact Service Principal they are authorized to use.
+
 ---
 
 ## 🚀 Running the Bot
