@@ -102,9 +102,15 @@ DATABASE_URL=postgresql+asyncpg://user:pass@host/dbname
 
 2. **Start the Server**:
    ```bash
-   python main.py
+   uv run python main.py
    ```
    The bot will start using Uvicorn on the configured port.
+
+3. **Run the Test Suite**:
+   ```bash
+   uv run pytest -v
+   ```
+   This will execute all asynchronous and mocked API tests to verify codebase integrity.
 
 ---
 

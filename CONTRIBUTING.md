@@ -18,6 +18,16 @@ git checkout -b 325-add-new-chart-type
 ## Get the test suite running
 
 Make sure you have `uv` or standard Python `venv` set up, as described in the README.
+We use `pytest` for all unit and integration testing, relying heavily on `pytest-asyncio` and `pytest-mock`. 
+
+To run the full test suite locally, execute:
+```sh
+uv run pytest -v
+```
+
+> [!NOTE]
+> For detailed instructions on writing tests, mocking external services, and dealing with `asyncio`, please refer to our **[Testing Guide](TESTING.md)**.
+
 Ensure your code passes the local build and tests before pushing.
 
 ## Code Style & Conventions
