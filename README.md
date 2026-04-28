@@ -20,24 +20,31 @@ A powerful, production-ready Microsoft Teams bot that interfaces seamlessly with
 The bot serves as an intelligent middleware between Microsoft Teams and your Databricks ecosystem. It dynamically routes user queries, handles scope permissions, triggers SQL execution via Genie, and augments the results using LLMs.
 
 ```mermaid
-graph TD
-    User(["Microsoft Teams User"]) -- "Natural Language Query" --> Bot["Teams Genie Bot (FastAPI)"]
+sequenceDiagram
+    actor User as Teams User
+    participant Bot as Teams Genie Bot
+    participant DB as Database
+    participant Auth as Graph API
+    participant Genie as Genie API
+    participant LLM as LLM Endpoint
+
+    User->>Bot: "What were our top 5 products?"
     
-    subgraph Core Framework
-        Bot -- "1. Checks User Scope & Session" --> DB[("Database / SQLModel")]
-        Bot -- "2. Resolves Entra ID Security Groups" --> Auth["Graph API Resolver"]
-    end
-
-    subgraph Databricks Ecosystem
-        Bot -- "3. Executes NL Query" --> Genie["Databricks Genie API"]
-        Genie -. "Returns SQL & Raw Data Array" .-> Bot
-        
-        Bot -- "4. Sends Raw Data for Analysis" --> LLM["Databricks LLM Endpoint"]
-        LLM -. "Returns Insights & Chart Recommendation" .-> Bot
-    end
-
-    Bot -- "5. Assembles Adaptive Card" --> AC["Adaptive Card Builder"]
-    AC -- "Renders Summary, Chart, & Table" --> User
+    Note over Bot, Auth: 1. Authentication & State
+    Bot->>DB: Get User Scope & Session
+    DB-->>Bot: Selected Space
+    Bot->>Auth: Resolve Entra ID Groups
+    Auth-->>Bot: Service Principal Credentials
+    
+    Note over Bot, LLM: 2. Databricks Ecosystem
+    Bot->>Genie: Execute NL Query
+    Genie-->>Bot: Generated SQL & Raw Data
+    Bot->>LLM: Analyze Raw Data
+    LLM-->>Bot: AI Insights & Chart Type
+    
+    Note over Bot, User: 3. UI Generation
+    Bot->>Bot: Assemble Adaptive Card
+    Bot-->>User: Reply with Summary, Chart, & Table
 ```
 
 ---
