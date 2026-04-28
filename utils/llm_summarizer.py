@@ -8,7 +8,7 @@ from langchain_openai import ChatOpenAI
 load_dotenv()
 logger = logging.getLogger(__name__)
 llm_endpoint = environ.get(
-    "DATABRICKS_LLM_ENDPOINT", "databricks-qwen3-next-80b-a3b-instruct"
+    "OPENAI_MODEL_NAME", "databricks-qwen3-next-80b-a3b-instruct"
 )
 
 
@@ -75,7 +75,7 @@ class LlmSummarizer:
                 "temperature": 0.1,
             }
 
-            base_url = environ.get("model_base_url")
+            base_url = environ.get("OPENAI_BASE_URL")
             if base_url:
                 kwargs["base_url"] = base_url
 

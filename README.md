@@ -76,8 +76,10 @@ PORT=3978
 
 ### Databricks & Database Settings
 ```ini
-# LLM Endpoint for summarizing the SQL output (default: databricks-qwen3-next-80b-a3b-instruct)
-DATABRICKS_LLM_ENDPOINT=databricks-qwen3-next-80b-a3b-instruct
+# OpenAI-Compatible LLM Settings (e.g., Databricks, OpenAI, vLLM, Ollama)
+OPENAI_MODEL_NAME=gpt-4o-mini
+OPENAI_BASE_URL=https://api.openai.com/v1
+OPENAI_API_KEY=your_api_key_here
 
 # Optional: Global Databricks Token (If not using Entra ID scoped credentials)
 DATABRICKS_TOKEN=<Personal_Access_Token>
