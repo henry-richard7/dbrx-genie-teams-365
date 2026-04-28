@@ -118,19 +118,22 @@ class LlmSummarizer:
         prompt_template = """
             You are an expert data analyst. Below is a dataset.
 
-            Your task is to analyze the data and provide a response formatted in Markdown for Microsoft Teams:
-            - Use **Bold** for headers.
-            - Use bullet points for lists.
-            
-            Provide:
-            1. **Summary**: A concise, insightful summary (2-4 sentences) of the key trends or observations.
-            2. **Next Best Action**: A recommendation based on the data.
+            Your task is to analyze the data and provide a JSON response. 
+            The JSON MUST have two keys:
+            1. "text": A Markdown formatted string containing:
+               - **Summary**: A concise, insightful summary (2-4 sentences) of the key trends.
+               - **Next Best Action**: A recommendation based on the data.
+            2. "chart": A string representing the best chart type to visualize this data. 
+               Choose from: ["Chart.VerticalBar", "Chart.HorizontalBar.Stacked", "Chart.Donut", "Chart.VerticalBar.Grouped", null]. 
+               Use null if the data is not suitable for a chart (e.g. detailed row-level data or non-aggregated data).
 
             Dataset:
             {data}
 
             User Query:
             {query}
+            
+            Return ONLY valid JSON. Do not include markdown code blocks like ```json.
             """
 
         formatted_prompt = prompt_template.format(data=table_text, query=question)
@@ -143,22 +146,36 @@ class LlmSummarizer:
         else:
             response_content = str(response)
 
-        # The LLM may return a JSON string with reasoning and text parts.
-        # We need to parse it and extract the user-facing text.
+        # Strip markdown code blocks if the LLM adds them
+        response_content = response_content.strip()
+        if response_content.startswith("```json"):
+            response_content = response_content[7:]
+        if response_content.startswith("```"):
+            response_content = response_content[3:]
+        if response_content.endswith("```"):
+            response_content = response_content[:-3]
+        response_content = response_content.strip()
+
+        # Parse the JSON response
         try:
             parsed_response = json.loads(response_content)
-            # The response is expected to be a list of dictionaries
+            
+            # Extract standard dict response
+            if isinstance(parsed_response, dict) and "text" in parsed_response:
+                return parsed_response
+
+            # Handle Databricks AI Gateway legacy list format
             if isinstance(parsed_response, list):
                 for item in parsed_response:
-                    # We are interested in the part with type 'text'
-                    if (
-                        isinstance(item, dict)
-                        and item.get("type") == "text"
-                        and "text" in item
-                    ):
-                        return item["text"]
-            # If the expected structure isn't found, return the raw content as a fallback.
-            return response_content
+                    if isinstance(item, dict) and item.get("type") == "text" and "text" in item:
+                        # Try to parse the inner text as JSON
+                        try:
+                            inner_parsed = json.loads(item["text"])
+                            if isinstance(inner_parsed, dict) and "text" in inner_parsed:
+                                return inner_parsed
+                        except json.JSONDecodeError:
+                            return {"text": item["text"], "chart": None}
+
+            return {"text": response_content, "chart": None}
         except (json.JSONDecodeError, TypeError):
-            # If JSON parsing fails, assume it's the direct text response.
-            return response_content
+            return {"text": response_content, "chart": None}

@@ -268,6 +268,7 @@ class MessageHandler:
             summary_card.add_text(genie_response["query_description"])
 
         table_card = None
+        chart_card = None
 
         if "data" in genie_response and "columns" in genie_response:
             # Generate summary
@@ -287,7 +288,7 @@ class MessageHandler:
                         client_id = dbrx_creds.databricks_client_id
                         client_secret = dbrx_creds.databricks_client_secret
 
-                summary = await asyncio.to_thread(
+                summary_result = await asyncio.to_thread(
                     self.llm_summarizer.summarize,
                     genie_response["columns"]["columns"],
                     genie_response["data"]["data_array"],
@@ -295,7 +296,34 @@ class MessageHandler:
                     client_id,
                     client_secret,
                 )
-                summary_card.add_text(summary)
+                
+                if isinstance(summary_result, dict):
+                    summary_text = summary_result.get("text", "")
+                    chart_type = summary_result.get("chart")
+                else:
+                    summary_text = str(summary_result)
+                    chart_type = None
+
+                summary_card.add_text(summary_text)
+
+                # Add chart if enabled and recommended
+                if chart_type and os.environ.get("ENABLE_CHARTS", "inactive").lower() == "active":
+                    try:
+                        logger.debug(f"Attempting to render chart: {chart_type}")
+                        chart_card = AdaptiveCardTemplate()
+                        # Slice data to top 15 rows for charts to improve readability
+                        chart_data = {"data_array": genie_response["data"]["data_array"][:15]}
+                        if chart_type == "Chart.VerticalBar":
+                            chart_card.add_vertical_bar_chart(chart_data, genie_response["columns"])
+                        elif chart_type == "Chart.Donut":
+                            chart_card.add_donut_chart(chart_data, genie_response["columns"])
+                        elif chart_type == "Chart.VerticalBar.Grouped":
+                            chart_card.add_grouped_bar_chart(chart_data, genie_response["columns"])
+                        elif chart_type == "Chart.HorizontalBar.Stacked":
+                            chart_card.add_stacked_horizontal_bar_chart(chart_data, genie_response["columns"])
+                    except Exception as ce:
+                        logger.error(f"Failed to render chart {chart_type}: {ce}", exc_info=True)
+                        chart_card = None
             except Exception as e:
                 logger.error(f"Failed to generate summary: {e}", exc_info=True)
 
@@ -340,6 +368,11 @@ class MessageHandler:
         logger.debug("Sending Summary Adaptive Card response to user.")
         summary_attachment = CardFactory.adaptive_card(summary_card.get_adaptive_card())
         await turn_context.send_activity(MessageFactory.attachment(summary_attachment))
+
+        if chart_card:
+            logger.debug("Sending Chart Adaptive Card response to user.")
+            chart_attachment = CardFactory.adaptive_card(chart_card.get_adaptive_card())
+            await turn_context.send_activity(MessageFactory.attachment(chart_attachment))
 
         if table_card:
             logger.debug("Sending Table Adaptive Card response to user.")
