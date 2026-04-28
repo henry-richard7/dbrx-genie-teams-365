@@ -477,77 +477,81 @@ class MessageHandler:
         Args:
             turn_context (TurnContext): The context object for the current turn.
         """
-        user_id = turn_context.activity.from_property.id
-        logger.info(f"process_message triggered for user: {user_id}")
-        if (
-            turn_context.activity.value is not None
-        ):  # This indicates a card action response
-            logger.debug(
-                "Message contains 'value' payload. Delegating to handle_card_action."
-            )
-            await self.handle_card_action(
-                turn_context, user_id, turn_context.activity.value
-            )
-            return
-        else:
-            # This is a regular message, process commands
-            text = turn_context.activity.text.strip().lower()
-            logger.debug(f"Processing regular text message: '{text}'")
-
-            if fuzz.partial_ratio(text, COMMAND_LIST_SPACES) >= 70:
-                # Use fuzzy matching to allow for minor typos
+        try:
+            user_id = turn_context.activity.from_property.id
+            logger.info(f"process_message triggered for user: {user_id}")
+            if (
+                turn_context.activity.value is not None
+            ):  # This indicates a card action response
                 logger.debug(
-                    f"Text matches '{COMMAND_LIST_SPACES}' command. Fuzzy ratio: {fuzz.partial_ratio(text, COMMAND_LIST_SPACES)}"
+                    "Message contains 'value' payload. Delegating to handle_card_action."
                 )
-                list_spaces_kwargs = {"user_id": user_id}
-                has_global_token = bool(os.environ.get("DATABRICKS_TOKEN"))
-                has_global_oauth = bool(os.environ.get("DATABRICKS_CLIENT_ID") and os.environ.get("DATABRICKS_CLIENT_SECRET"))
-                if not (has_global_token or has_global_oauth):
-                    user_groups = turn_context.turn_state.get("user_groups", [])
-                    logger.debug(f"User {user_id} is in groups: {user_groups}")
-                    if len(user_groups) > 1:
-                        logger.info(
-                            f"User is in multiple groups, prompting for scope selection."
-                        )
-                        await self.send_group_selection_card(turn_context, user_groups)
-                        return
-
-                    creds = turn_context.turn_state.get("databricks_creds")
-                    if not creds:
-                        logger.error(
-                            "Could not determine credentials for list spaces command."
-                        )
-                        await turn_context.send_activity(
-                            "Could not determine credentials."
-                        )
-                        return
-
-                    list_spaces_kwargs["client_id"] = creds.databricks_client_id
-                    list_spaces_kwargs["client_secret"] = creds.databricks_client_secret
-                    list_spaces_kwargs["scope_name"] = getattr(
-                        creds, "group_name", creds.group_id
-                    )
-
-                logger.debug("Calling GenieListHandler to fetching spaces.")
-                response = await BotUtilities.keep_typing_while(
-                    turn_context,
-                    self.genie_list_handler.handle_list_spaces,
-                    **list_spaces_kwargs,
+                await self.handle_card_action(
+                    turn_context, user_id, turn_context.activity.value
                 )
-                await turn_context.send_activity(response)
+                return
             else:
-                # Check if user has a space selected
-                logger.debug("Checking if user has an active Genie space selected.")
-                user_selection = await self.database.get_user_selection(user_id)
-                if user_selection and user_selection.space_id:
-                    logger.info(
-                        f"User has selected scope {user_selection.space_id}. Delegating to handle_genie_question."
+                # This is a regular message, process commands
+                text = turn_context.activity.text.strip().lower()
+                logger.debug(f"Processing regular text message: '{text}'")
+
+                if fuzz.partial_ratio(text, COMMAND_LIST_SPACES) >= 70:
+                    # Use fuzzy matching to allow for minor typos
+                    logger.debug(
+                        f"Text matches '{COMMAND_LIST_SPACES}' command. Fuzzy ratio: {fuzz.partial_ratio(text, COMMAND_LIST_SPACES)}"
                     )
-                    await self.handle_genie_question(
-                        turn_context, user_id, text, user_selection
+                    list_spaces_kwargs = {"user_id": user_id}
+                    has_global_token = bool(os.environ.get("DATABRICKS_TOKEN"))
+                    has_global_oauth = bool(os.environ.get("DATABRICKS_CLIENT_ID") and os.environ.get("DATABRICKS_CLIENT_SECRET"))
+                    if not (has_global_token or has_global_oauth):
+                        user_groups = turn_context.turn_state.get("user_groups", [])
+                        logger.debug(f"User {user_id} is in groups: {user_groups}")
+                        if len(user_groups) > 1:
+                            logger.info(
+                                f"User is in multiple groups, prompting for scope selection."
+                            )
+                            await self.send_group_selection_card(turn_context, user_groups)
+                            return
+
+                        creds = turn_context.turn_state.get("databricks_creds")
+                        if not creds:
+                            logger.error(
+                                "Could not determine credentials for list spaces command."
+                            )
+                            await turn_context.send_activity(
+                                "Could not determine credentials."
+                            )
+                            return
+
+                        list_spaces_kwargs["client_id"] = creds.databricks_client_id
+                        list_spaces_kwargs["client_secret"] = creds.databricks_client_secret
+                        list_spaces_kwargs["scope_name"] = getattr(
+                            creds, "group_name", creds.group_id
+                        )
+
+                    logger.debug("Calling GenieListHandler to fetching spaces.")
+                    response = await BotUtilities.keep_typing_while(
+                        turn_context,
+                        self.genie_list_handler.handle_list_spaces,
+                        **list_spaces_kwargs,
                     )
+                    await turn_context.send_activity(response)
                 else:
-                    logger.info("User requested a question but has no scope selected.")
-                    await turn_context.send_activity(
-                        "Please select a Genie space first by typing 'list genie spaces'."
-                    )
+                    # Check if user has a space selected
+                    logger.debug("Checking if user has an active Genie space selected.")
+                    user_selection = await self.database.get_user_selection(user_id)
+                    if user_selection and user_selection.space_id:
+                        logger.info(
+                            f"User has selected scope {user_selection.space_id}. Delegating to handle_genie_question."
+                        )
+                        await self.handle_genie_question(
+                            turn_context, user_id, text, user_selection
+                        )
+                    else:
+                        logger.info("User requested a question but has no scope selected.")
+                        await turn_context.send_activity(
+                            "Please select a Genie space first by typing 'list genie spaces'."
+                        )
+        except Exception as e:
+            logger.error(f"Unexpected error in process_message: {e}", exc_info=True)
+            await turn_context.send_activity("❌ I'm sorry, I encountered an unexpected error while processing your request. Please try again later.")

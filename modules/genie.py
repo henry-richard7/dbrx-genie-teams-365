@@ -218,7 +218,8 @@ class Genie:
             logger.error(f"Error formatting query response: {str(e)}")
             return {"message": "Query executed but results could not be formatted"}
 
-    def _extract_query_description(message_content: Any) -> str:
+    @staticmethod
+    def _extract_query_description(message_content: Any) -> dict:
         """Extracts the underlying SQL query and description from a Genie message.
 
         Args:

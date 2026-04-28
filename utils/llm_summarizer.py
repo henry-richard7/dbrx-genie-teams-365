@@ -143,7 +143,14 @@ class LlmSummarizer:
         formatted_prompt = prompt_template.format(data=table_text, query=question)
 
         # Request completion
-        response = model.invoke(formatted_prompt)
+        try:
+            response = model.invoke(formatted_prompt)
+        except Exception as e:
+            logger.warning(f"LLM API failed or rate limit reached: {e}")
+            return {
+                "text": "⚠️ **AI Insights Unavailable**\n\nThe AI assistant is currently experiencing high demand or reached its rate limits. Your raw data results are provided below.",
+                "chart": None
+            }
 
         if hasattr(response, "content"):
             response_content = response.content
