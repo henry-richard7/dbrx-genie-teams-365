@@ -149,10 +149,20 @@ The repository is highly modular and utilizes Google-style docstrings across all
     *   `AdaptiveCardTemplate.py`: A utility factory for dynamically generating complex JSON Adaptive Cards (Tables, Code Blocks, Charts).
 *   **`database/`**:
     *   `database.py`: Handles async SQL connection pooling via `sqlalchemy.ext.asyncio`.
-    *   `db_models.py`: Defines the `SQLModel` schemas for tracking user sessions and space mappings.
+    *   `db_models.py`: Defines the `SQLModel` schemas for the bot.
 *   **`utils/`**:
     *   `llm_summarizer.py`: Orchestrates the `ChatOpenAI` calls to the Databricks Model Serving endpoint. Includes resilient fallback logic for rate limits.
     *   `user_group.py`: Handles OAuth flow with Microsoft Graph to determine Entra ID group memberships.
+
+---
+
+## 🗄️ Database Models
+
+The bot uses SQLModel to manage three core tables that track user sessions and multi-tenant access:
+
+1.  **`GenieSpace`**: Caches the Databricks Genie spaces accessible to a user. This prevents hitting the Databricks API repeatedly when a user lists their spaces.
+2.  **`UserSelection`**: Acts as the active session tracker. It stores the `user_id` along with the currently selected `space_id`, the active `conversation_id` for continuous chat threads, and the chosen `user_group_id` for scoping credentials.
+3.  **`SecurityGroupMapping`**: A configuration table mapping Microsoft Entra ID (Azure AD) security group Object IDs to specific Databricks Service Principal credentials (`databricks_client_id` and `databricks_client_secret`). This ensures strict data segregation across different enterprise groups.
 
 ---
 
