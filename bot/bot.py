@@ -1,5 +1,8 @@
 """
-This module contains the Bot logic.
+This module contains the core Bot logic for Microsoft Teams integration.
+
+It handles incoming messages, user authorization, multi-tenant group resolution,
+and orchestrates responses using various handlers.
 """
 
 from os import environ
@@ -22,11 +25,20 @@ logger = logging.getLogger(__name__)
 
 
 class TeamsGenieBot(TeamsActivityHandler):
-    """
-    The main Microsoft 365 Agents Class
+    """The main Microsoft 365 Agents Class.
+
+    This class handles Microsoft Teams activities such as member addition,
+    file consent, and incoming messages.
+
+    Attributes:
+        database (Database): The SQLite database interface for storing user state.
+        message_handler (MessageHandler): The handler for processing incoming chat messages.
+        file_card_handler (FileCardHandler): The handler for processing Excel file consent events.
+        user_group (UserGroup): The utility for determining user security groups from Entra ID.
     """
 
     def __init__(self):
+        """Initializes the TeamsGenieBot and sets up its associated handlers and utilities."""
         super().__init__()
         self.database = Database()
         self.message_handler = MessageHandler(self.database)
@@ -36,6 +48,12 @@ class TeamsGenieBot(TeamsActivityHandler):
     async def on_members_added_activity(
         self, members_added: list[ChannelAccount], turn_context: TurnContext
     ):
+        """Handles activities when new members are added to a conversation.
+
+        Args:
+            members_added (list[ChannelAccount]): A list of members added to the conversation.
+            turn_context (TurnContext): The context object for this turn.
+        """
         logger.info(
             f"on_members_added_activity triggered. Members added: {[m.id for m in members_added]}"
         )
@@ -47,8 +65,14 @@ class TeamsGenieBot(TeamsActivityHandler):
     async def on_teams_file_consent(
         self, turn_context: TurnContext, file_consent_card_response: dict
     ):
-        """
-        Override to handle dictionary response.
+        """Handles user responses to file consent cards in Teams.
+
+        This method acts as a router, redirecting to the accept or decline handler
+        based on the user's interaction with the file consent card.
+
+        Args:
+            turn_context (TurnContext): The context object for this turn.
+            file_consent_card_response (dict): The dictionary containing the user's response.
         """
         action = file_consent_card_response.get("action")
         logger.info(f"on_teams_file_consent triggered with action: {action}")
@@ -68,6 +92,15 @@ class TeamsGenieBot(TeamsActivityHandler):
         turn_context: TurnContext,
         file_consent_card_response: dict,
     ):
+        """Processes the acceptance of a file consent request.
+
+        Decodes the file bytes from the card's context and uploads the file to the
+        provided upload URL via an HTTP PUT request.
+
+        Args:
+            turn_context (TurnContext): The context object for this turn.
+            file_consent_card_response (dict): The payload containing file bytes and upload URLs.
+        """
         logger.info("on_teams_file_consent_accept triggered.")
         await turn_context.delete_activity(turn_context.activity.reply_to_id)
 
@@ -118,8 +151,14 @@ class TeamsGenieBot(TeamsActivityHandler):
         turn_context: TurnContext,
         file_consent_card_response: dict,
     ):
-        """
-        The user declined the file upload.
+        """Processes the decline of a file consent request.
+
+        Sends a confirmation message to the user acknowledging that the file upload
+        was declined and will not proceed.
+
+        Args:
+            turn_context (TurnContext): The context object for this turn.
+            file_consent_card_response (dict): The payload containing the file context.
         """
         logger.info("on_teams_file_consent_decline triggered.")
         await turn_context.delete_activity(turn_context.activity.reply_to_id)
@@ -134,6 +173,14 @@ class TeamsGenieBot(TeamsActivityHandler):
         await turn_context.send_activity(reply)
 
     async def on_message_activity(self, turn_context: TurnContext):
+        """Handles incoming message activities from users.
+
+        Validates user credentials against global settings or Entra ID security groups.
+        If the user is authorized, it delegates message processing to the MessageHandler.
+
+        Args:
+            turn_context (TurnContext): The context object containing the message payload.
+        """
         logger.info("on_message_activity triggered.")
         has_global_token = bool(environ.get("DATABRICKS_TOKEN"))
         has_global_oauth = bool(environ.get("DATABRICKS_CLIENT_ID") and environ.get("DATABRICKS_CLIENT_SECRET"))

@@ -22,7 +22,18 @@ logger = logging.getLogger(__name__)
 
 
 class MessageHandler:
-    """This handler processes incoming messages and routes them to the appropriate logic."""
+    """Processes incoming messages from Teams and routes them to the appropriate logic.
+
+    This class handles the core interaction flow: resolving commands, processing
+    button clicks (Adaptive Card actions), querying Databricks Genie spaces,
+    and rendering responses as Adaptive Cards.
+
+    Attributes:
+        database (Database): The database interface for managing state.
+        genie_list_handler (GenieListHandler): The handler for space listing.
+        file_card_handler (FileCardHandler): The handler for file downloads.
+        llm_summarizer (LlmSummarizer): The utility for generating AI summaries.
+    """
 
     def __init__(self, database: Database):
         self.database = database
@@ -33,7 +44,13 @@ class MessageHandler:
     async def handle_card_action(
         self, turn_context: TurnContext, user_id: str, action_data: dict
     ):
-        """Handle actions from adaptive card buttons."""
+        """Processes button clicks and form submissions from Adaptive Cards.
+
+        Args:
+            turn_context (TurnContext): The context object for the current turn.
+            user_id (str): The Microsoft Teams user ID.
+            action_data (dict): The payload returned from the Adaptive Card action.
+        """
         action = action_data.get("action")
         logger.info(
             f"handle_card_action triggered for user: {user_id}, action: {action}"
@@ -163,7 +180,14 @@ class MessageHandler:
     async def handle_space_selection(
         self, turn_context: TurnContext, user_id: str, space_id: str, space_name: str
     ):
-        """Save the user's space selection."""
+        """Saves the user's selected Databricks Genie Space and updates context.
+
+        Args:
+            turn_context (TurnContext): The context object for the current turn.
+            user_id (str): The Microsoft Teams user ID.
+            space_id (str): The ID of the selected space.
+            space_name (str): The name of the selected space.
+        """
         logger.info(
             f"handle_space_selection triggered for user: {user_id}, space: {space_name} ({space_id})"
         )
@@ -186,7 +210,18 @@ class MessageHandler:
         question: str,
         user_selection: UserSelection,
     ):
-        """Handle natural language questions to Genie."""
+        """Executes a natural language query against the selected Genie space.
+
+        Retrieves the results from Databricks, uses the LLM to summarize them,
+        generates charts if applicable, and sends the response back to Teams
+        as a series of Adaptive Cards.
+
+        Args:
+            turn_context (TurnContext): The context object for the current turn.
+            user_id (str): The Microsoft Teams user ID.
+            question (str): The natural language query submitted by the user.
+            user_selection (UserSelection): The user's active context state.
+        """
         logger.info(
             f"handle_genie_question triggered for user: {user_id}, question: '{question}'"
         )
@@ -391,7 +426,12 @@ class MessageHandler:
     async def send_group_selection_card(
         self, turn_context: TurnContext, user_groups: list
     ):
-        """Send a card to allow user to select a security group."""
+        """Sends an Adaptive Card asking the user to select an active security group scope.
+
+        Args:
+            turn_context (TurnContext): The context object for the current turn.
+            user_groups (list): A list of SecurityGroupMapping objects the user belongs to.
+        """
         card_template = AdaptiveCardTemplate()
         card_template.add_text(
             content="🔐 Select Access Scope",
@@ -428,6 +468,15 @@ class MessageHandler:
         await turn_context.send_activity(MessageFactory.attachment(attachment))
 
     async def process_message(self, turn_context: TurnContext):
+        """The main entry point for processing incoming messages.
+
+        Routes the message based on whether it is an Adaptive Card action (button click)
+        or a natural language message. For text, it handles commands like 'list genie spaces'
+        or delegates to `handle_genie_question`.
+
+        Args:
+            turn_context (TurnContext): The context object for the current turn.
+        """
         user_id = turn_context.activity.from_property.id
         logger.info(f"process_message triggered for user: {user_id}")
         if (

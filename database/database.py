@@ -1,3 +1,4 @@
+import os
 from .db_models import UserSelection, GenieSpace, SecurityGroupMapping
 from sqlmodel import select, SQLModel
 from sqlalchemy.ext.asyncio import create_async_engine
@@ -9,22 +10,44 @@ logger = logging.getLogger(__name__)
 
 
 class Database:
-    def __init__(self, db_url: str = "sqlite+aiosqlite:///teams_genie_bot.db"):
+    """A wrapper class for SQLite database interactions using SQLModel and async SQLAlchemy.
+
+    Provides methods to manage database tables, read/write user configuration,
+    Genie space mappings, and security group resolution for multi-tenant access.
+    """
+    def __init__(self, db_url: str = None):
+        """Initializes the Database instance and async engine.
+
+        Args:
+            db_url (str, optional): The database connection URL. If not provided, it reads from the environment variable 'DATABASE_URL', defaulting to the local SQLite DB.
+        """
+        if db_url is None:
+            db_url = os.environ.get("DATABASE_URL", "sqlite+aiosqlite:///teams_genie_bot.db")
         logger.debug(f"Initializing Database with URL: {db_url}")
         self.engine = create_async_engine(db_url)
 
     async def create_tables(self):
+        """Creates all database tables defined by SQLModel if they do not exist."""
         logger.info("Creating database tables if they do not exist.")
         async with self.engine.begin() as conn:
             await conn.run_sync(SQLModel.metadata.create_all)
         logger.debug("Database tables created successfully.")
 
     async def close(self):
+        """Disposes of the database engine to close connections cleanly."""
         logger.info("Closing database engine.")
         await self.engine.dispose()
         logger.debug("Database engine closed.")
 
     async def get_user_space_mappings(self, user_id: str) -> List[GenieSpace]:
+        """Retrieves all Genie Space mappings associated with a specific user.
+
+        Args:
+            user_id (str): The Microsoft Teams user ID.
+
+        Returns:
+            List[GenieSpace]: A list of mapped GenieSpace instances.
+        """
         logger.debug(f"Fetching space mappings for user: {user_id}")
         async with AsyncSession(self.engine) as session:
             statement = select(GenieSpace).where(GenieSpace.user_id == user_id)
@@ -35,7 +58,18 @@ class Database:
 
     async def add_user_space_mapping(
         self, user_id: str, space_id: str, space_name: str, description: str = None
-    ):
+    ) -> GenieSpace:
+        """Adds a new Genie Space mapping for a user.
+
+        Args:
+            user_id (str): The Microsoft Teams user ID.
+            space_id (str): The Databricks Genie Space ID.
+            space_name (str): The human-readable name of the space.
+            description (str, optional): A description of the space. Defaults to None.
+
+        Returns:
+            GenieSpace: The created GenieSpace instance.
+        """
         logger.debug(
             f"Adding space mapping for user {user_id}: {space_name} ({space_id})"
         )
@@ -54,7 +88,15 @@ class Database:
             )
             return mapping
 
-    async def clear_user_space_mappings(self, user_id: str):
+    async def clear_user_space_mappings(self, user_id: str) -> int:
+        """Removes all stored Genie Space mappings for a specific user.
+
+        Args:
+            user_id (str): The Microsoft Teams user ID.
+
+        Returns:
+            int: The number of mappings deleted.
+        """
         logger.debug(f"Clearing all active space mappings for user: {user_id}")
         async with AsyncSession(self.engine) as session:
             statement = select(GenieSpace).where(GenieSpace.user_id == user_id)
@@ -68,7 +110,18 @@ class Database:
 
     async def add_user_selection(
         self, user_id: str, space_id: str, space_name: str, conversation_id: str
-    ):
+    ) -> UserSelection:
+        """Adds a new active user selection for a Genie Space.
+
+        Args:
+            user_id (str): The Microsoft Teams user ID.
+            space_id (str): The selected Genie Space ID.
+            space_name (str): The selected Genie Space name.
+            conversation_id (str): The active conversation ID for context.
+
+        Returns:
+            UserSelection: The created UserSelection record.
+        """
         logger.debug(
             f"Adding user selection for {user_id}: {space_name} (Conversation: {conversation_id})"
         )
@@ -85,7 +138,16 @@ class Database:
             logger.info(f"Successfully added user selection for {user_id}")
             return selection
 
-    async def update_user_scope(self, user_id: str, user_group_id: str):
+    async def update_user_scope(self, user_id: str, user_group_id: str) -> UserSelection | None:
+        """Updates the security group scope for a user's selection.
+
+        Args:
+            user_id (str): The Microsoft Teams user ID.
+            user_group_id (str): The new security group ID.
+
+        Returns:
+            UserSelection | None: The updated UserSelection, or None if not found.
+        """
         logger.debug(f"Updating user scope for {user_id} to group: {user_group_id}")
         async with AsyncSession(self.engine) as session:
             statement = select(UserSelection).where(UserSelection.user_id == user_id)
@@ -104,7 +166,15 @@ class Database:
         )
         return None
 
-    async def get_user_selection(self, user_id: str) -> UserSelection:
+    async def get_user_selection(self, user_id: str) -> UserSelection | None:
+        """Retrieves the active user selection and context state.
+
+        Args:
+            user_id (str): The Microsoft Teams user ID.
+
+        Returns:
+            UserSelection | None: The user's active selection, or None if empty.
+        """
         logger.debug(f"Fetching current user selection for: {user_id}")
         async with AsyncSession(self.engine) as session:
             statement = select(UserSelection).where(UserSelection.user_id == user_id)
@@ -120,7 +190,18 @@ class Database:
 
     async def update_user_selection(
         self, user_id: str, space_id: str, space_name: str, conversation_id: str
-    ):
+    ) -> UserSelection:
+        """Updates an existing user selection, or creates one if it doesn't exist.
+
+        Args:
+            user_id (str): The Microsoft Teams user ID.
+            space_id (str): The new Genie Space ID.
+            space_name (str): The new Genie Space name.
+            conversation_id (str): The new conversation ID.
+
+        Returns:
+            UserSelection: The updated or newly created UserSelection record.
+        """
         logger.debug(
             f"Updating user selection for {user_id} -> {space_name} (Space: {space_id}, Conv: {conversation_id})"
         )
@@ -153,6 +234,14 @@ class Database:
     async def get_security_group_mapping(
         self, group_id: list[str]
     ) -> list[SecurityGroupMapping]:
+        """Fetches Databricks credentials associated with a list of security group IDs.
+
+        Args:
+            group_id (list[str]): A list of Microsoft Entra ID group Object IDs.
+
+        Returns:
+            list[SecurityGroupMapping]: The matching security group configurations.
+        """
         logger.debug(f"Fetching security group mappings for group IDs: {group_id}")
         async with AsyncSession(self.engine) as session:
             statement = select(SecurityGroupMapping).where(
@@ -163,7 +252,15 @@ class Database:
             logger.debug(f"Found {len(mappings)} configured security group mappings.")
             return mappings
 
-    async def get_scope_details(self, user_group_id: str) -> SecurityGroupMapping:
+    async def get_scope_details(self, user_group_id: str) -> SecurityGroupMapping | None:
+        """Retrieves Databricks credentials for a single security group ID.
+
+        Args:
+            user_group_id (str): The Microsoft Entra ID group Object ID.
+
+        Returns:
+            SecurityGroupMapping | None: The security group config, or None if not found.
+        """
         logger.debug(f"Fetching scope details for single group ID: {user_group_id}")
         async with AsyncSession(self.engine) as session:
             statement = select(SecurityGroupMapping).where(

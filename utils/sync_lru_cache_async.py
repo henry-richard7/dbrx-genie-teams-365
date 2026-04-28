@@ -1,5 +1,7 @@
-"""
-Utility decorators for the Databricks Genie Bot.
+"""Utility decorators for the Databricks Genie Bot.
+
+This module provides caching utilities to optimize repeated asynchronous API calls,
+such as fetching available Genie spaces from Databricks.
 """
 
 import time
@@ -7,7 +9,17 @@ from functools import wraps
 
 
 def sync_lru_cache_async(maxsize=128):
-    """Simpler async cache - caches the result after first call."""
+    """An asynchronous Least Recently Used (LRU) cache decorator.
+
+    Caches the results of asynchronous function calls based on arguments.
+    Implements a Time-To-Live (TTL) of 300 seconds (5 minutes).
+
+    Args:
+        maxsize (int, optional): The maximum number of items to store in the cache. Defaults to 128.
+
+    Returns:
+        Callable: The decorated asynchronous function.
+    """
 
     def decorator(func):
         cache = {}

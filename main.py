@@ -1,5 +1,8 @@
 """
-The main module to run Teams Genie Bot
+The main module to run Teams Genie Bot.
+
+This module initializes the FastAPI server, configures the Bot Framework adapter
+and state storage, and sets up routing for Microsoft Teams activities.
 """
 
 import logging
@@ -47,7 +50,10 @@ USER_STATE = UserState(STORAGE)
 
 def create_agent():
     """
-    Create the appropriate agent based on configuration.
+    Creates and returns the appropriate agent based on configuration.
+
+    Returns:
+        TeamsGenieBot: An instantiated TeamsGenieBot handling activities.
     """
     return TeamsGenieBot()
 
@@ -60,6 +66,15 @@ AGENT = create_agent()
 async def lifespan(app: FastAPI):
     """
     Handles startup and shutdown events for the FastAPI application.
+
+    This context manager ensures that database tables are created when the app starts
+    and that the database connection is cleanly closed when the app shuts down.
+
+    Args:
+        app (FastAPI): The FastAPI application instance.
+
+    Yields:
+        None
     """
     # on startup
     await AGENT.database.create_tables()
@@ -79,7 +94,16 @@ app.add_middleware(JwtAuthorizationMiddleware)
 @app.post("/api/messages")
 async def messages(req: Request):
     """
-    Handles Teams Messages.
+    Endpoint for handling incoming Microsoft Teams messages and activities.
+
+    This endpoint receives POST requests from the Azure Bot Framework, processes
+    them via the configured adapter, and routes them to the agent.
+
+    Args:
+        req (Request): The incoming FastAPI HTTP request containing activity data.
+
+    Returns:
+        Response: The HTTP response from the Bot Framework adapter.
     """
     # adapter: CloudAdapter = req.app["adapter"]
     # return await adapter.process(req, AGENT)

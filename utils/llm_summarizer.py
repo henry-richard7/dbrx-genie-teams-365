@@ -13,10 +13,11 @@ llm_endpoint = environ.get(
 
 
 class LlmSummarizer:
-    """LlmSummarizer: Generates concise summaries from datasets using a language model.
+    """Generates concise summaries from Databricks SQL datasets using a language model.
 
-    This class provides a method to convert structured data into a textual summary
-    and another method to generate a summary using a language model.
+    This class provides a method to convert structured data into a textual representation
+    (Markdown table) and a method to generate an analytical summary and recommend charts
+    using a configured ChatOpenAI model.
     """
 
     def __init__(self):
@@ -25,14 +26,14 @@ class LlmSummarizer:
 
     @staticmethod
     def dataframe_to_text(columns: list, data: list) -> str:
-        """Convert a list of column definitions and data into a Markdown table representation.
+        """Converts a list of column definitions and data into a Markdown table representation.
 
-        Parameters:
-        columns (list of dict): List of column definitions (must have 'name' key).
-        data (list of lists): The tabular data.
+        Args:
+            columns (list): List of column definitions (must have 'name' key).
+            data (list): The tabular row data.
 
         Returns:
-        str: A Markdown table representation of the data.
+            str: A Markdown table representation of the data.
         """
         if not columns:
             return ""
@@ -49,18 +50,21 @@ class LlmSummarizer:
             
         return "\n".join([header_row, separator] + rows)
 
-    def summarize(self, columns, data, question, client_id=None, client_secret=None):
-        """Summarizes the given dataset using a chat model.
+    def summarize(self, columns: list, data: list, question: str, client_id: str = None, client_secret: str = None) -> dict:
+        """Summarizes the given dataset using a configured language model.
+
+        Converts the data to a Markdown table and prompts the LLM to return a structured
+        JSON response containing an analytical summary, next best action, and a chart recommendation.
 
         Args:
-            columns (list of dict): List of column definitions.
+            columns (list): List of column definitions.
             data (list): Data to be summarized.
-            question (str): User query to guide the summary.
-            client_id (str, optional): Client ID for Databricks.
-            client_secret (str, optional): Client secret for Databricks.
+            question (str): The user query to guide the summary context.
+            client_id (str, optional): OAuth Client ID for Databricks. Defaults to None.
+            client_secret (str, optional): OAuth Client Secret for Databricks. Defaults to None.
 
         Returns:
-            str: A concise summary of the dataset based on the user query.
+            dict: A dictionary containing 'text' (the summary) and 'chart' (the recommended chart type).
         """
 
         cache_key = client_id or "default"

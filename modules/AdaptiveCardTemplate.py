@@ -1,5 +1,12 @@
 class AdaptiveCardTemplate:
+    """A utility class for dynamically constructing Microsoft Teams Adaptive Cards.
+
+    Provides methods to build structured Adaptive Card JSON payloads containing
+    text, tables, SQL code blocks, and various interactive chart types.
+    """
+
     def __init__(self):
+        """Initializes an empty Adaptive Card template."""
         self.root = {
             "type": "AdaptiveCard",
             "$schema": "https://adaptivecards.io/schemas/adaptive-card.json",
@@ -16,6 +23,15 @@ class AdaptiveCardTemplate:
         color: str = "Default",
         spacing: str = "Default",
     ):
+        """Appends a TextBlock to the Adaptive Card.
+
+        Args:
+            content (str): The text to display.
+            is_title (bool, optional): If True, formats the text as a bold title. Defaults to False.
+            wrap (bool, optional): If True, allows text to wrap. Defaults to True.
+            color (str, optional): The color of the text (e.g., 'Accent', 'Attention'). Defaults to "Default".
+            spacing (str, optional): The spacing above the block. Defaults to "Default".
+        """
         self.root["body"].append(
             {
                 "type": "TextBlock",
@@ -28,7 +44,13 @@ class AdaptiveCardTemplate:
             }
         )
 
-    def add_query_result_table(self, columns_info, data_info):
+    def add_query_result_table(self, columns_info: dict, data_info: dict):
+        """Appends a data table to the Adaptive Card based on query results.
+
+        Args:
+            columns_info (dict): A dictionary containing column metadata.
+            data_info (dict): A dictionary containing the row data array.
+        """
         table_generation = {
             "type": "Table",
             "gridStyle": "accent",
@@ -79,7 +101,12 @@ class AdaptiveCardTemplate:
 
         self.root["body"].append(table_generation)
 
-    def add_sql_code(self, query):
+    def add_sql_code(self, query: str):
+        """Appends a toggleable SQL code block to the Adaptive Card.
+
+        Args:
+            query (str): The raw SQL query string to display.
+        """
         self.root["body"].append(
             {
                 "type": "ActionSet",
@@ -104,11 +131,21 @@ class AdaptiveCardTemplate:
 
     def add_vertical_bar_chart(
         self,
-        data,
-        columns,
+        data: dict,
+        columns: dict,
         show_bar_values: bool = True,
         chart_type: str = "Chart.VerticalBar",
     ):
+        """Appends a Vertical Bar Chart to the Adaptive Card.
+
+        Automatically detects X (string) and Y (numeric) columns from the metadata.
+
+        Args:
+            data (dict): The dataset dictionary containing 'data_array'.
+            columns (dict): The column metadata dictionary.
+            show_bar_values (bool, optional): Whether to display values on bars. Defaults to True.
+            chart_type (str, optional): The Adaptive Card chart type. Defaults to "Chart.VerticalBar".
+        """
         chart_base = {
             "title": "New Chart.VerticalBar",
             "type": chart_type,
@@ -166,7 +203,16 @@ class AdaptiveCardTemplate:
 
         self.root["body"].append(chart_base)
 
-    def add_donut_chart(self, data, columns, chart_type: str = "Chart.Donut"):
+    def add_donut_chart(self, data: dict, columns: dict, chart_type: str = "Chart.Donut"):
+        """Appends a Donut Chart to the Adaptive Card.
+
+        Automatically detects legend (string) and value (numeric) columns from the metadata.
+
+        Args:
+            data (dict): The dataset dictionary containing 'data_array'.
+            columns (dict): The column metadata dictionary.
+            chart_type (str, optional): The Adaptive Card chart type. Defaults to "Chart.Donut".
+        """
         chart_base = {
             "title": "New Chart.Donut",
             "data": [],
@@ -225,11 +271,17 @@ class AdaptiveCardTemplate:
         self.root["body"].append(chart_base)
 
     def add_grouped_bar_chart(
-        self, data, columns, chart_type: str = "Chart.VerticalBar.Grouped"
+        self, data: dict, columns: dict, chart_type: str = "Chart.VerticalBar.Grouped"
     ):
-        """
-        Auto-detect the best X-axis (label) and legend string columns,
-        and build a Chart.VerticalBar.Grouped card.
+        """Appends a Grouped Vertical Bar Chart to the Adaptive Card.
+
+        Auto-detects the best X-axis (category) and legend (series) string columns
+        based on the number of unique values.
+
+        Args:
+            data (dict): The dataset dictionary containing 'data_array'.
+            columns (dict): The column metadata dictionary.
+            chart_type (str, optional): The Adaptive Card chart type. Defaults to "Chart.VerticalBar.Grouped".
         """
         chart_base = {
             "title": "New Chart.VerticalBar.Grouped",
@@ -299,13 +351,18 @@ class AdaptiveCardTemplate:
 
     def add_stacked_horizontal_bar_chart(
         self,
-        data,
-        columns,
+        data: dict,
+        columns: dict,
         chart_type: str = "Chart.HorizontalBar.Stacked",
     ):
-        """
-        Auto-detect legend series and build a Chart.HorizontalBar.Stacked card
-        like the JSON you posted.
+        """Appends a Stacked Horizontal Bar Chart to the Adaptive Card.
+
+        Auto-detects legend series and builds a Chart.HorizontalBar.Stacked card.
+
+        Args:
+            data (dict): The dataset dictionary containing 'data_array'.
+            columns (dict): The column metadata dictionary.
+            chart_type (str, optional): The Adaptive Card chart type. Defaults to "Chart.HorizontalBar.Stacked".
         """
 
         chart_base = {
@@ -373,8 +430,18 @@ class AdaptiveCardTemplate:
 
         self.root["body"].append(chart_base)
 
-    def add_item(self, item):
+    def add_item(self, item: dict):
+        """Appends a raw JSON item to the Adaptive Card body.
+
+        Args:
+            item (dict): The JSON schema defining the Adaptive Card element.
+        """
         self.root["body"].append(item)
 
-    def get_adaptive_card(self):
+    def get_adaptive_card(self) -> dict:
+        """Returns the fully constructed Adaptive Card JSON object.
+
+        Returns:
+            dict: The Adaptive Card schema payload.
+        """
         return self.root

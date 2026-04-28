@@ -6,8 +6,24 @@ load_dotenv()
 
 
 class UserGroup:
+    """Utility class for retrieving user security groups from Microsoft Entra ID (Azure AD).
 
+    This class handles authentication with the Microsoft Graph API using
+    client credentials and fetches all transitive group memberships for a user.
+    """
+    
     async def get_user_group_ids(self, email_id: str) -> list[str]:
+        """Fetches the Entra ID security group Object IDs for a given user.
+
+        Authenticates against Microsoft Graph API using the service connection settings
+        and retrieves all groups the user is a transitive member of.
+
+        Args:
+            email_id (str): The email address (User Principal Name) of the user.
+
+        Returns:
+            list[str]: A list of Entra ID group Object IDs.
+        """
         token_url = f"https://login.microsoftonline.com/{environ.get('CONNECTIONS__SERVICE_CONNECTION__SETTINGS__TENANTID')}/oauth2/v2.0/token"
         token_data = {
             "grant_type": "client_credentials",

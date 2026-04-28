@@ -1,4 +1,9 @@
-"""This module contains the logics used for showing available genie spaces."""
+"""Module for fetching and displaying available Databricks Genie spaces.
+
+This module builds the Adaptive Cards required to present users with a list of
+Genie spaces they can interact with, complete with description formatting and
+selection buttons.
+"""
 
 from microsoft_agents.hosting.core import MessageFactory, CardFactory
 from microsoft_agents.activity import Activity
@@ -9,11 +14,18 @@ from database.database import Database
 
 
 class GenieListHandler:
-    """
-    This handler lists available genie spaces.
+    """A handler for querying and displaying available Databricks Genie Spaces.
+
+    Attributes:
+        db (Database): The database interface used to fetch or cache user space mappings.
     """
 
     def __init__(self, database: Database):
+        """Initializes the GenieListHandler.
+
+        Args:
+            database (Database): The instantiated Database class.
+        """
         self.db = database
 
     async def handle_list_spaces(
@@ -23,7 +35,21 @@ class GenieListHandler:
         client_secret: str = None,
         scope_name: str = None,
     ) -> Activity:
-        """Handle request to list available spaces with enhanced formatting and inline buttons."""
+        """Handles the request to fetch and render available Genie spaces.
+
+        If spaces are not cached in the database, it queries the Databricks API
+        using the provided credentials and stores them. It then builds an Adaptive Card
+        with inline buttons allowing the user to select a space.
+
+        Args:
+            user_id (str): The Microsoft Teams user ID.
+            client_id (str, optional): The OAuth Client ID for Databricks. Defaults to None.
+            client_secret (str, optional): The OAuth Client Secret for Databricks. Defaults to None.
+            scope_name (str, optional): The name of the current scope/group (for display purposes). Defaults to None.
+
+        Returns:
+            Activity: A Microsoft Teams message activity containing the rendered Adaptive Card.
+        """
         try:
             existing_mappings = await self.db.get_user_space_mappings(user_id)
 
