@@ -21,22 +21,22 @@ The bot serves as an intelligent middleware between Microsoft Teams and your Dat
 
 ```mermaid
 graph TD
-    User([Microsoft Teams User]) -- "Natural Language Query" --> Bot[Teams Genie Bot (FastAPI)]
+    User(["Microsoft Teams User"]) -- "Natural Language Query" --> Bot["Teams Genie Bot (FastAPI)"]
     
     subgraph Core Framework
-        Bot -- "1. Checks User Scope & Session" --> DB[(Database / SQLModel)]
-        Bot -- "2. Resolves Entra ID Security Groups" --> Auth[Graph API Resolver]
+        Bot -- "1. Checks User Scope & Session" --> DB[("Database / SQLModel")]
+        Bot -- "2. Resolves Entra ID Security Groups" --> Auth["Graph API Resolver"]
     end
 
     subgraph Databricks Ecosystem
-        Bot -- "3. Executes NL Query" --> Genie[Databricks Genie API]
+        Bot -- "3. Executes NL Query" --> Genie["Databricks Genie API"]
         Genie -. "Returns SQL & Raw Data Array" .-> Bot
         
-        Bot -- "4. Sends Raw Data for Analysis" --> LLM[Databricks LLM Endpoint]
+        Bot -- "4. Sends Raw Data for Analysis" --> LLM["Databricks LLM Endpoint"]
         LLM -. "Returns Insights & Chart Recommendation" .-> Bot
     end
 
-    Bot -- "5. Assembles Adaptive Card" --> AC[Adaptive Card Builder]
+    Bot -- "5. Assembles Adaptive Card" --> AC["Adaptive Card Builder"]
     AC -- "Renders Summary, Chart, & Table" --> User
 ```
 
