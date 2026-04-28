@@ -97,7 +97,9 @@ class MessageHandler:
             )  # Clear cached spaces for the user
 
             list_spaces_kwargs = {"user_id": user_id}
-            if not os.environ.get("DATABRICKS_TOKEN"):
+            has_global_token = bool(os.environ.get("DATABRICKS_TOKEN"))
+            has_global_oauth = bool(os.environ.get("DATABRICKS_CLIENT_ID") and os.environ.get("DATABRICKS_CLIENT_SECRET"))
+            if not (has_global_token or has_global_oauth):
                 creds = turn_context.turn_state.get("databricks_creds")
                 if not creds:
                     logger.error("Credentials not found during refresh_spaces.")
@@ -118,7 +120,9 @@ class MessageHandler:
 
         elif action == "retry_spaces":
             list_spaces_kwargs = {"user_id": user_id}
-            if not os.environ.get("DATABRICKS_TOKEN"):
+            has_global_token = bool(os.environ.get("DATABRICKS_TOKEN"))
+            has_global_oauth = bool(os.environ.get("DATABRICKS_CLIENT_ID") and os.environ.get("DATABRICKS_CLIENT_SECRET"))
+            if not (has_global_token or has_global_oauth):
                 creds = turn_context.turn_state.get("databricks_creds")
                 if not creds:
                     await turn_context.send_activity("Error: Credentials not found.")
@@ -186,8 +190,11 @@ class MessageHandler:
         logger.info(
             f"handle_genie_question triggered for user: {user_id}, question: '{question}'"
         )
-        if os.environ.get("DATABRICKS_TOKEN"):
-            logger.debug("Using global DATABRICKS_TOKEN to initialize Genie.")
+        has_global_token = bool(os.environ.get("DATABRICKS_TOKEN"))
+        has_global_oauth = bool(os.environ.get("DATABRICKS_CLIENT_ID") and os.environ.get("DATABRICKS_CLIENT_SECRET"))
+        
+        if has_global_token or has_global_oauth:
+            logger.debug("Using global Databricks credentials to initialize Genie.")
             genie = Genie()
         else:
             dbrx_creds = turn_context.turn_state.get("databricks_creds")
@@ -253,12 +260,14 @@ class MessageHandler:
             await turn_context.send_activity(genie_response["message"])
             return
 
-        # Create Adaptive Card for data response
-        card = AdaptiveCardTemplate()
-        card.add_text(question.title(), is_title=True, color="Accent")
+        # Create Adaptive Card for summary response
+        summary_card = AdaptiveCardTemplate()
+        summary_card.add_text(question.title(), is_title=True, color="Accent")
 
         if "query_description" in genie_response:
-            card.add_text(genie_response["query_description"])
+            summary_card.add_text(genie_response["query_description"])
+
+        table_card = None
 
         if "data" in genie_response and "columns" in genie_response:
             # Generate summary
@@ -267,7 +276,9 @@ class MessageHandler:
 
                 client_id = None
                 client_secret = None
-                if not os.environ.get("DATABRICKS_TOKEN"):
+                has_global_token = bool(os.environ.get("DATABRICKS_TOKEN"))
+                has_global_oauth = bool(os.environ.get("DATABRICKS_CLIENT_ID") and os.environ.get("DATABRICKS_CLIENT_SECRET"))
+                if not (has_global_token or has_global_oauth):
                     # user's scope dbrx_creds should be defined from earlier in handle_genie_question
                     dbrx_creds = getattr(
                         turn_context.turn_state, "get", lambda x, y=None: None
@@ -284,7 +295,7 @@ class MessageHandler:
                     client_id,
                     client_secret,
                 )
-                card.add_text(summary)
+                summary_card.add_text(summary)
             except Exception as e:
                 logger.error(f"Failed to generate summary: {e}", exc_info=True)
 
@@ -292,8 +303,9 @@ class MessageHandler:
             logger.debug(f"Data row count: {row_count}")
 
             if row_count < 100:
-                logger.debug("Row count < 100, adding table to Adaptive Card.")
-                card.add_query_result_table(
+                logger.debug("Row count < 100, creating table Adaptive Card.")
+                table_card = AdaptiveCardTemplate()
+                table_card.add_query_result_table(
                     genie_response["columns"], genie_response["data"]
                 )
             else:
@@ -320,12 +332,19 @@ class MessageHandler:
                 filename = f"{uuid4()}.xlsx"
 
         if "query" in genie_response:
-            logger.debug("Adding SQL query to Adaptive Card.")
-            card.add_sql_code(genie_response["query"])
+            logger.debug("Adding SQL query to table Adaptive Card.")
+            if table_card is None:
+                table_card = AdaptiveCardTemplate()
+            table_card.add_sql_code(genie_response["query"])
 
-        logger.debug("Sending Adaptive Card response to user.")
-        attachment = CardFactory.adaptive_card(card.get_adaptive_card())
-        await turn_context.send_activity(MessageFactory.attachment(attachment))
+        logger.debug("Sending Summary Adaptive Card response to user.")
+        summary_attachment = CardFactory.adaptive_card(summary_card.get_adaptive_card())
+        await turn_context.send_activity(MessageFactory.attachment(summary_attachment))
+
+        if table_card:
+            logger.debug("Sending Table Adaptive Card response to user.")
+            table_attachment = CardFactory.adaptive_card(table_card.get_adaptive_card())
+            await turn_context.send_activity(MessageFactory.attachment(table_attachment))
 
         if sending_excel:
             logger.info(f"Sending Excel file card for {filename}")
@@ -399,7 +418,9 @@ class MessageHandler:
                     f"Text matches '{COMMAND_LIST_SPACES}' command. Fuzzy ratio: {fuzz.partial_ratio(text, COMMAND_LIST_SPACES)}"
                 )
                 list_spaces_kwargs = {"user_id": user_id}
-                if not os.environ.get("DATABRICKS_TOKEN"):
+                has_global_token = bool(os.environ.get("DATABRICKS_TOKEN"))
+                has_global_oauth = bool(os.environ.get("DATABRICKS_CLIENT_ID") and os.environ.get("DATABRICKS_CLIENT_SECRET"))
+                if not (has_global_token or has_global_oauth):
                     user_groups = turn_context.turn_state.get("user_groups", [])
                     logger.debug(f"User {user_id} is in groups: {user_groups}")
                     if len(user_groups) > 1:

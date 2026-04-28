@@ -16,7 +16,6 @@ dependencies = [
     "microsoft-agents-hosting-core>=0.8.0",
     "microsoft-agents-hosting-fastapi>=0.8.0",
     "microsoft-agents-hosting-teams>=0.8.0",
-    "pandas>=3.0.1",
     "polars>=1.38.1",
     "sqlmodel>=0.0.37",
     "thefuzz>=0.22.1",

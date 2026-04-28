@@ -4,7 +4,6 @@ from os import environ
 
 from dotenv import load_dotenv
 from langchain_openai import ChatOpenAI
-import pandas as pd
 
 load_dotenv()
 logger = logging.getLogger(__name__)
@@ -16,27 +15,39 @@ llm_endpoint = environ.get(
 class LlmSummarizer:
     """LlmSummarizer: Generates concise summaries from datasets using a language model.
 
-    This class provides a method to convert a pandas DataFrame into a textual summary
-    and another method to generate a summary from structured data using a language model.
+    This class provides a method to convert structured data into a textual summary
+    and another method to generate a summary using a language model.
     """
 
+    def __init__(self):
+        self._models = {}
+        self._workspace_clients = {}
+
     @staticmethod
-    def dataframe_to_text(df: pd.DataFrame) -> str:
-        """Convert a pandas DataFrame to a string representation without the index.
+    def dataframe_to_text(columns: list, data: list) -> str:
+        """Convert a list of column definitions and data into a Markdown table representation.
 
         Parameters:
-        df (pd.DataFrame): The DataFrame to be converted.
+        columns (list of dict): List of column definitions (must have 'name' key).
+        data (list of lists): The tabular data.
 
         Returns:
-        str: A string representation of the DataFrame, excluding the index.
-
-        Example:
-        >>> df = pd.DataFrame({'A': [1, 2], 'B': [3, 4]})
-        >>> dataframe_to_text(df)
-        'A    B\n--- ----\n1    3\n2    4
+        str: A Markdown table representation of the data.
         """
+        if not columns:
+            return ""
 
-        return df.to_string(index=False)
+        headers = [str(col["name"]) for col in columns]
+        
+        # Build Markdown table
+        header_row = "| " + " | ".join(headers) + " |"
+        separator = "| " + " | ".join("---" for _ in headers) + " |"
+        
+        rows = []
+        for row in data:
+            rows.append("| " + " | ".join(str(item) for item in row) + " |")
+            
+        return "\n".join([header_row, separator] + rows)
 
     def summarize(self, columns, data, question, client_id=None, client_secret=None):
         """Summarizes the given dataset using a chat model.
@@ -45,51 +56,64 @@ class LlmSummarizer:
             columns (list of dict): List of column definitions.
             data (list): Data to be summarized.
             question (str): User query to guide the summary.
+            client_id (str, optional): Client ID for Databricks.
+            client_secret (str, optional): Client secret for Databricks.
 
         Returns:
             str: A concise summary of the dataset based on the user query.
         """
 
-        kwargs = {
-            "model": llm_endpoint,
-            "temperature": 0.1,
-        }
+        cache_key = client_id or "default"
 
-        base_url = environ.get("model_base_url")
-        if base_url:
-            kwargs["base_url"] = base_url
+        if cache_key not in self._models:
+            kwargs = {
+                "model": llm_endpoint,
+                "temperature": 0.1,
+            }
 
-        kwargs["api_key"] = environ.get("OPENAI_API_KEY", "not-provided")
+            base_url = environ.get("model_base_url")
+            if base_url:
+                kwargs["base_url"] = base_url
 
-        if client_id and client_secret:
-            logger.debug(f"Initializing ChatOpenAI with client_id: {client_id}")
-            from databricks.sdk import WorkspaceClient
-            import os
+            kwargs["api_key"] = environ.get("OPENAI_API_KEY")
 
-            # Use databricks sdk to configure the workspace client directly
-            host = environ.get(
-                "DATABRICKS_HOST",
-            )
+            if not kwargs["api_key"] or kwargs["api_key"] == "not-provided":
+                logger.debug("Attempting to get token from Databricks WorkspaceClient")
+                from databricks.sdk import WorkspaceClient
 
-            try:
-                # Initialize WorkspaceClient to get token for AI Gateway
-                w = WorkspaceClient(
-                    host=host, client_id=client_id, client_secret=client_secret
-                )
-                creds = w.config.authenticate()
-                if creds:
-                    kwargs["api_key"] = creds.get("Authorization").replace(
-                        "Bearer ", ""
-                    )
-            except Exception as e:
-                logger.error(f"Error initializing Databricks WorkspaceClient: {e}")
-        else:
-            logger.debug("Initializing ChatOpenAI without explicit client credentials")
+                host = environ.get("DATABRICKS_HOST")
 
-        model = ChatOpenAI(**kwargs)
-        df = pd.DataFrame(data, columns=[col["name"] for col in columns])
+                try:
+                    # Cache the WorkspaceClient to reuse authentication session
+                    if cache_key not in self._workspace_clients:
+                        if client_id and client_secret:
+                            self._workspace_clients[cache_key] = WorkspaceClient(
+                                host=host, client_id=client_id, client_secret=client_secret
+                            )
+                        else:
+                            self._workspace_clients[cache_key] = WorkspaceClient(host=host)
+                    
+                    w = self._workspace_clients[cache_key]
+                    creds = w.config.authenticate()
+                    if creds and isinstance(creds, dict) and "Authorization" in creds:
+                        kwargs["api_key"] = creds.get("Authorization").replace("Bearer ", "")
+                    elif w.config.token:
+                        kwargs["api_key"] = w.config.token
+                    
+                    if "base_url" not in kwargs and host:
+                        kwargs["base_url"] = f"{host.rstrip('/')}/serving-endpoints"
+                except Exception as e:
+                    logger.error(f"Error initializing Databricks WorkspaceClient: {e}")
 
-        table_text = self.dataframe_to_text(df)
+            if not kwargs.get("api_key"):
+                kwargs["api_key"] = "not-provided"
+
+            self._models[cache_key] = ChatOpenAI(**kwargs)
+
+        model = self._models[cache_key]
+
+        # Convert data to Markdown table directly without pandas
+        table_text = self.dataframe_to_text(columns, data)
 
         prompt_template = """
             You are an expert data analyst. Below is a dataset.

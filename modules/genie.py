@@ -21,8 +21,8 @@ class Genie:
         self._databricks_token = environ.get("DATABRICKS_TOKEN")
         self._genie_api = None
         self._workspace_client = None
-        self._client_id = client_id
-        self._client_secret = client_secret
+        self._client_id = client_id or environ.get("DATABRICKS_CLIENT_ID")
+        self._client_secret = client_secret or environ.get("DATABRICKS_CLIENT_SECRET")
 
     @property
     def workspace_client(self) -> WorkspaceClient:

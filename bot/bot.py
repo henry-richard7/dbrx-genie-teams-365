@@ -135,10 +135,13 @@ class TeamsGenieBot(TeamsActivityHandler):
 
     async def on_message_activity(self, turn_context: TurnContext):
         logger.info("on_message_activity triggered.")
-        if environ.get("DATABRICKS_TOKEN"):
-            # If a global Databricks token is provided, bypass group-based access control.
+        has_global_token = bool(environ.get("DATABRICKS_TOKEN"))
+        has_global_oauth = bool(environ.get("DATABRICKS_CLIENT_ID") and environ.get("DATABRICKS_CLIENT_SECRET"))
+        
+        if has_global_token or has_global_oauth:
+            # If global Databricks credentials are provided, bypass group-based access control.
             logger.debug(
-                "Global DATABRICKS_TOKEN found, bypassing group access control."
+                "Global Databricks credentials found, bypassing group access control."
             )
             await self.message_handler.process_message(turn_context)
             return
