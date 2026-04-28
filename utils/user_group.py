@@ -12,6 +12,19 @@ class UserGroup:
     client credentials and fetches all transitive group memberships for a user.
     """
     
+    def __init__(self):
+        self._session = None
+
+    @property
+    def session(self) -> aiohttp.ClientSession:
+        if self._session is None or self._session.closed:
+            self._session = aiohttp.ClientSession()
+        return self._session
+
+    async def close(self):
+        if self._session and not self._session.closed:
+            await self._session.close()
+
     async def get_user_group_ids(self, email_id: str) -> list[str]:
         """Fetches the Entra ID security group Object IDs for a given user.
 
@@ -36,20 +49,18 @@ class UserGroup:
             "scope": "https://graph.microsoft.com/.default",
         }
 
-        async with aiohttp.ClientSession() as session:
-            async with session.post(token_url, data=token_data) as token_response:
-                token_data = await token_response.json()
-                access_token = token_data["access_token"]
+        async with self.session.post(token_url, data=token_data) as token_response:
+            token_data = await token_response.json()
+            access_token = token_data["access_token"]
 
         headers = {"Authorization": f"Bearer {access_token}"}
         url = f"https://graph.microsoft.com/v1.0/users/{email_id}/transitiveMemberOf"
 
-        async with aiohttp.ClientSession() as session:
-            async with session.get(url, headers=headers) as response:
-                data = await response.json()
-                group_ids = [
-                    item["id"]
-                    for item in data.get("value", [])
-                    if item["@odata.type"] == "#microsoft.graph.group"
-                ]
-                return group_ids
+        async with self.session.get(url, headers=headers) as response:
+            data = await response.json()
+            group_ids = [
+                item["id"]
+                for item in data.get("value", [])
+                if item["@odata.type"] == "#microsoft.graph.group"
+            ]
+            return group_ids

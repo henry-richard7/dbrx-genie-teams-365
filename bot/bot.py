@@ -44,6 +44,13 @@ class TeamsGenieBot(TeamsActivityHandler):
         self.message_handler = MessageHandler(self.database)
         self.file_card_handler = FileCardHandler()
         self.user_group = UserGroup()
+        self.session = None
+
+    async def close(self):
+        """Clean up background resources and sessions."""
+        if self.session and not self.session.closed:
+            await self.session.close()
+        await self.user_group.close()
 
     async def on_members_added_activity(
         self, members_added: list[ChannelAccount], turn_context: TurnContext
@@ -118,7 +125,7 @@ class TeamsGenieBot(TeamsActivityHandler):
 
         try:
             logger.debug(f"Uploading file {file_name} with size {file_size} bytes.")
-            if not getattr(self, "session", None) or self.session.closed:
+            if not self.session or self.session.closed:
                 logger.debug("Initializing new aiohttp ClientSession for upload.")
                 self.session = aiohttp.ClientSession()
             async with self.session.put(

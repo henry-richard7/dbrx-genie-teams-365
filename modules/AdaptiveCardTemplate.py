@@ -15,6 +15,24 @@ class AdaptiveCardTemplate:
             "body": [],
         }
 
+    def _classify_columns(self, columns: dict) -> tuple[list[int], list[int], list[int], dict[int, str]]:
+        """Helper to classify columns into ID, String, and Numeric positions, and build a position-to-name map."""
+        id_columns = []
+        string_columns = []
+        numeric_columns = []
+        column_map = {col["position"]: col["name"] for col in columns["columns"]}
+
+        for col in columns["columns"]:
+            col_name = col["name"].lower()
+            if "id" in col_name:
+                id_columns.append(col["position"])
+            elif col["type_name"] == "STRING":
+                string_columns.append(col["position"])
+            elif col["type_name"] in ["LONG", "INT", "BIGINT", "DOUBLE", "FLOAT"]:
+                numeric_columns.append(col["position"])
+                
+        return id_columns, string_columns, numeric_columns, column_map
+
     def add_text(
         self,
         content: str,
@@ -153,21 +171,7 @@ class AdaptiveCardTemplate:
             "showBarValues": show_bar_values,
         }
 
-        id_columns = []
-        string_columns = []
-        numeric_columns = []
-
-        # Create column mappings for easy lookup
-        column_map = {col["position"]: col["name"] for col in columns["columns"]}
-
-        for col in columns["columns"]:
-            col_name = col["name"].lower()
-            if "id" in col_name:
-                id_columns.append(col["position"])
-            elif col["type_name"] == "STRING":
-                string_columns.append(col["position"])
-            elif col["type_name"] in ["LONG", "INT", "BIGINT", "DOUBLE", "FLOAT"]:
-                numeric_columns.append(col["position"])
+        id_columns, string_columns, numeric_columns, column_map = self._classify_columns(columns)
 
         # Find x and y column names
         x_column_name = None
@@ -219,21 +223,7 @@ class AdaptiveCardTemplate:
             "type": chart_type,
         }
 
-        id_columns = []
-        string_columns = []
-        numeric_columns = []
-
-        # Create column mappings for easy lookup
-        column_map = {col["position"]: col["name"] for col in columns["columns"]}
-
-        for col in columns["columns"]:
-            col_name = col["name"].lower()
-            if "id" in col_name:
-                id_columns.append(col["position"])
-            elif col["type_name"] == "STRING":
-                string_columns.append(col["position"])
-            elif col["type_name"] in ["LONG", "INT", "BIGINT", "DOUBLE", "FLOAT"]:
-                numeric_columns.append(col["position"])
+        id_columns, string_columns, numeric_columns, column_map = self._classify_columns(columns)
 
         # Find x and y column names
         x_column_name = None
@@ -290,19 +280,7 @@ class AdaptiveCardTemplate:
             "data": [],
         }
 
-        id_columns = []
-        string_columns = []
-        numeric_columns = []
-        column_map = {col["position"]: col["name"] for col in columns["columns"]}
-
-        for col in columns["columns"]:
-            col_name = col["name"].lower()
-            if "id" in col_name:
-                id_columns.append(col["position"])
-            elif col["type_name"] == "STRING":
-                string_columns.append(col["position"])
-            elif col["type_name"] in ["LONG", "INT", "BIGINT", "DOUBLE", "FLOAT"]:
-                numeric_columns.append(col["position"])
+        id_columns, string_columns, numeric_columns, column_map = self._classify_columns(columns)
 
         if len(string_columns) < 2 or not numeric_columns:
             return  # not enough columns
@@ -373,19 +351,7 @@ class AdaptiveCardTemplate:
             "data": [],
         }
 
-        id_columns = []
-        string_columns = []
-        numeric_columns = []
-        column_map = {col["position"]: col["name"] for col in columns["columns"]}
-
-        for col in columns["columns"]:
-            col_name = col["name"].lower()
-            if "id" in col_name:
-                id_columns.append(col["position"])
-            elif col["type_name"] == "STRING":
-                string_columns.append(col["position"])
-            elif col["type_name"] in ["LONG", "INT", "BIGINT", "DOUBLE", "FLOAT"]:
-                numeric_columns.append(col["position"])
+        id_columns, string_columns, numeric_columns, column_map = self._classify_columns(columns)
 
         # We need at least one string column for legend, one for category (x), one numeric
         if len(string_columns) < 2 or not numeric_columns:

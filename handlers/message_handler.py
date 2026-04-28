@@ -41,6 +41,42 @@ class MessageHandler:
         self.file_card_handler = FileCardHandler()
         self.llm_summarizer = LlmSummarizer()
 
+    async def _get_databricks_credentials_kwargs(self, turn_context: TurnContext, send_prompt: bool = True, force_prompt: bool = False) -> dict | None:
+        """Helper to resolve Databricks credentials. Returns a dict of kwargs or None if missing."""
+        has_global_token = bool(os.environ.get("DATABRICKS_TOKEN"))
+        has_global_oauth = bool(os.environ.get("DATABRICKS_CLIENT_ID") and os.environ.get("DATABRICKS_CLIENT_SECRET"))
+        
+        if has_global_token or has_global_oauth:
+            return {} # Global credentials implicitly used
+
+        user_groups = turn_context.turn_state.get("user_groups", [])
+
+        if force_prompt and len(user_groups) > 1:
+            logger.info("User is in multiple groups and force_prompt is true, prompting for scope selection.")
+            await self.send_group_selection_card(turn_context, user_groups)
+            return None
+
+        creds = turn_context.turn_state.get("databricks_creds")
+        if creds:
+            return {
+                "client_id": creds.databricks_client_id,
+                "client_secret": creds.databricks_client_secret,
+                "scope_name": getattr(creds, "group_name", creds.group_id)
+            }
+        
+        if send_prompt:
+            if len(user_groups) > 1:
+                logger.info("User is in multiple groups, prompting for scope selection.")
+                await self.send_group_selection_card(turn_context, user_groups)
+            else:
+                logger.error("Could not determine access scope.")
+                await turn_context.send_activity("Error: Could not determine access scope. Please try `list genie spaces` again.")
+        else:
+            logger.error("Credentials not found.")
+            await turn_context.send_activity("Error: Credentials not found.")
+        
+        return None
+
     async def handle_card_action(
         self, turn_context: TurnContext, user_id: str, action_data: dict
     ):
@@ -113,20 +149,10 @@ class MessageHandler:
                 user_id
             )  # Clear cached spaces for the user
 
-            list_spaces_kwargs = {"user_id": user_id}
-            has_global_token = bool(os.environ.get("DATABRICKS_TOKEN"))
-            has_global_oauth = bool(os.environ.get("DATABRICKS_CLIENT_ID") and os.environ.get("DATABRICKS_CLIENT_SECRET"))
-            if not (has_global_token or has_global_oauth):
-                creds = turn_context.turn_state.get("databricks_creds")
-                if not creds:
-                    logger.error("Credentials not found during refresh_spaces.")
-                    await turn_context.send_activity("Error: Credentials not found.")
-                    return
-                list_spaces_kwargs["client_id"] = creds.databricks_client_id
-                list_spaces_kwargs["client_secret"] = creds.databricks_client_secret
-                list_spaces_kwargs["scope_name"] = getattr(
-                    creds, "group_name", creds.group_id
-                )
+            creds_kwargs = await self._get_databricks_credentials_kwargs(turn_context, send_prompt=False)
+            if creds_kwargs is None:
+                return
+            list_spaces_kwargs = {"user_id": user_id, **creds_kwargs}
 
             response = await BotUtilities.keep_typing_while(
                 turn_context,
@@ -136,19 +162,10 @@ class MessageHandler:
             await turn_context.send_activity(response)
 
         elif action == "retry_spaces":
-            list_spaces_kwargs = {"user_id": user_id}
-            has_global_token = bool(os.environ.get("DATABRICKS_TOKEN"))
-            has_global_oauth = bool(os.environ.get("DATABRICKS_CLIENT_ID") and os.environ.get("DATABRICKS_CLIENT_SECRET"))
-            if not (has_global_token or has_global_oauth):
-                creds = turn_context.turn_state.get("databricks_creds")
-                if not creds:
-                    await turn_context.send_activity("Error: Credentials not found.")
-                    return
-                list_spaces_kwargs["client_id"] = creds.databricks_client_id
-                list_spaces_kwargs["client_secret"] = creds.databricks_client_secret
-                list_spaces_kwargs["scope_name"] = getattr(
-                    creds, "group_name", creds.group_id
-                )
+            creds_kwargs = await self._get_databricks_credentials_kwargs(turn_context, send_prompt=False)
+            if creds_kwargs is None:
+                return
+            list_spaces_kwargs = {"user_id": user_id, **creds_kwargs}
 
             response = await BotUtilities.keep_typing_while(
                 turn_context,
@@ -225,31 +242,18 @@ class MessageHandler:
         logger.info(
             f"handle_genie_question triggered for user: {user_id}, question: '{question}'"
         )
-        has_global_token = bool(os.environ.get("DATABRICKS_TOKEN"))
-        has_global_oauth = bool(os.environ.get("DATABRICKS_CLIENT_ID") and os.environ.get("DATABRICKS_CLIENT_SECRET"))
+        creds_kwargs = await self._get_databricks_credentials_kwargs(turn_context, send_prompt=True)
+        if creds_kwargs is None:
+            return
+            
+        client_id = creds_kwargs.get("client_id")
+        client_secret = creds_kwargs.get("client_secret")
         
-        if has_global_token or has_global_oauth:
+        if not client_id and not client_secret:
             logger.debug("Using global Databricks credentials to initialize Genie.")
             genie = Genie()
         else:
-            dbrx_creds = turn_context.turn_state.get("databricks_creds")
-            if not dbrx_creds:
-                user_groups = turn_context.turn_state.get("user_groups", [])
-                if len(user_groups) > 1:
-                    logger.info(
-                        "User requested to ask a question but has not selected a scope yet."
-                    )
-                    await self.send_group_selection_card(turn_context, user_groups)
-                else:
-                    logger.error("Could not determine access scope.")
-                    await turn_context.send_activity(
-                        "Error: Could not determine access scope. Please try `list genie spaces` again."
-                    )
-                return
-            genie = Genie(
-                client_id=dbrx_creds.databricks_client_id,
-                client_secret=dbrx_creds.databricks_client_secret,
-            )
+            genie = Genie(client_id=client_id, client_secret=client_secret)
         sending_excel = False
 
         async def ask():
@@ -500,34 +504,10 @@ class MessageHandler:
                     logger.debug(
                         f"Text matches '{COMMAND_LIST_SPACES}' command. Fuzzy ratio: {fuzz.partial_ratio(text, COMMAND_LIST_SPACES)}"
                     )
-                    list_spaces_kwargs = {"user_id": user_id}
-                    has_global_token = bool(os.environ.get("DATABRICKS_TOKEN"))
-                    has_global_oauth = bool(os.environ.get("DATABRICKS_CLIENT_ID") and os.environ.get("DATABRICKS_CLIENT_SECRET"))
-                    if not (has_global_token or has_global_oauth):
-                        user_groups = turn_context.turn_state.get("user_groups", [])
-                        logger.debug(f"User {user_id} is in groups: {user_groups}")
-                        if len(user_groups) > 1:
-                            logger.info(
-                                f"User is in multiple groups, prompting for scope selection."
-                            )
-                            await self.send_group_selection_card(turn_context, user_groups)
-                            return
-
-                        creds = turn_context.turn_state.get("databricks_creds")
-                        if not creds:
-                            logger.error(
-                                "Could not determine credentials for list spaces command."
-                            )
-                            await turn_context.send_activity(
-                                "Could not determine credentials."
-                            )
-                            return
-
-                        list_spaces_kwargs["client_id"] = creds.databricks_client_id
-                        list_spaces_kwargs["client_secret"] = creds.databricks_client_secret
-                        list_spaces_kwargs["scope_name"] = getattr(
-                            creds, "group_name", creds.group_id
-                        )
+                    creds_kwargs = await self._get_databricks_credentials_kwargs(turn_context, send_prompt=True, force_prompt=True)
+                    if creds_kwargs is None:
+                        return
+                    list_spaces_kwargs = {"user_id": user_id, **creds_kwargs}
 
                     logger.debug("Calling GenieListHandler to fetching spaces.")
                     response = await BotUtilities.keep_typing_while(

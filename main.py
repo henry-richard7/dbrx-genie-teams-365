@@ -80,6 +80,7 @@ async def lifespan(app: FastAPI):
     await AGENT.database.create_tables()
     yield
     # on shutdown
+    await AGENT.close()
     await AGENT.database.close()
 
 

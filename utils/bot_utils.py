@@ -30,22 +30,18 @@ class BotUtilities:
     Returns:
         Any: The result returned by the executed function.
     """
-        cancel = {"cancel": False}
-        result = None
-
         async def keep_typing():
-            while not cancel["cancel"]:
-                await turn_context.send_activity(Activity(type=ActivityTypes.typing))
-                await asyncio.sleep(10)
+            try:
+                while True:
+                    await turn_context.send_activity(Activity(type=ActivityTypes.typing))
+                    await asyncio.sleep(10)
+            except asyncio.CancelledError:
+                pass
 
-        async def executor():
-            nonlocal result
+        typing_task = asyncio.create_task(keep_typing())
+        
+        try:
             result = await func(*args, **kwargs)
-            cancel["cancel"] = True
-
-        await asyncio.gather(
-            keep_typing(),
-            executor(),
-        )
-
-        return result
+            return result
+        finally:
+            typing_task.cancel()
