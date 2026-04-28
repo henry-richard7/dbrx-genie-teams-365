@@ -80,12 +80,14 @@ PORT=3978
 DATABRICKS_LLM_ENDPOINT=databricks-qwen3-next-80b-a3b-instruct
 
 # Optional: Global Databricks Token (If not using Entra ID scoped credentials)
-# DATABRICKS_TOKEN=<Personal_Access_Token>
-# DATABRICKS_HOST=<Workspace_Url>
+DATABRICKS_TOKEN=<Personal_Access_Token>
+DATABRICKS_HOST=<Workspace_Url>
+DATABRICKS_CLIENT_ID=<Databricks Oauth Client ID>
+DATABRICKS_CLIENT_SECRET=<Databricks Oauth Client Secret>
 
 # Optional: Database Connection String (Defaults to a local SQLite file)
 # Set this to a PostgreSQL or Azure SQL connection string for multi-pod production scaling!
-# DATABASE_URL=postgresql+asyncpg://user:pass@host/dbname
+DATABASE_URL=postgresql+asyncpg://user:pass@host/dbname
 ```
 
 ---
