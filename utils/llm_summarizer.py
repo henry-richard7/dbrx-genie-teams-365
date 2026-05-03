@@ -18,10 +18,17 @@ class LlmSummarizer:
     This class provides a method to convert structured data into a textual representation
     (Markdown table) and a method to generate an analytical summary and recommend charts
     using a configured ChatOpenAI model.
+
+    Model instances are cached per credential scope and automatically refreshed after
+    55 minutes so that short-lived Databricks OAuth tokens do not silently expire.
     """
+
+    # Refresh cached models after 55 min (Databricks OAuth tokens expire at 60 min)
+    _TOKEN_TTL_SECONDS = 55 * 60
 
     def __init__(self):
         self._models = {}
+        self._model_created_at = {}  # cache_key -> float (epoch seconds)
         self._workspace_clients = {}
 
     @staticmethod
@@ -67,9 +74,20 @@ class LlmSummarizer:
             dict: A dictionary containing 'text' (the summary) and 'chart' (the recommended chart type).
         """
 
+        import time
+
         cache_key = client_id or "default"
 
-        if cache_key not in self._models:
+        # Evict stale model so a fresh OAuth token is fetched
+        if cache_key in self._models:
+            age = time.time() - self._model_created_at.get(cache_key, 0)
+            if age >= self._TOKEN_TTL_SECONDS:
+                logger.debug(
+                    f"LlmSummarizer: model for scope '{cache_key}' "
+                    f"expired after {age:.0f}s, refreshing."
+                )
+                del self._models[cache_key]
+                del self._model_created_at[cache_key]
             kwargs = {
                 "model": llm_endpoint,
                 "temperature": 0.1,
@@ -113,6 +131,7 @@ class LlmSummarizer:
                 kwargs["api_key"] = "not-provided"
 
             self._models[cache_key] = ChatOpenAI(**kwargs)
+            self._model_created_at[cache_key] = time.time()
 
         model = self._models[cache_key]
 
