@@ -20,7 +20,7 @@ from microsoft_agents.hosting.fastapi import (
     JwtAuthorizationMiddleware,
     start_agent_process,
 )
-from microsoft_agents.hosting.core import Authorization, MemoryStorage, UserState
+from microsoft_agents.hosting.core import Authorization, MemoryStorage
 
 from bot.bot import TeamsGenieBot
 from config import DefaultConfig
@@ -45,21 +45,7 @@ CONNECTION_MANAGER = MsalConnectionManager(**agents_sdk_config)
 ADAPTER = CloudAdapter(connection_manager=CONNECTION_MANAGER)
 AUTHORIZATION = Authorization(STORAGE, CONNECTION_MANAGER, **agents_sdk_config)
 
-USER_STATE = UserState(STORAGE)
-
-
-def create_agent():
-    """
-    Creates and returns the appropriate agent based on configuration.
-
-    Returns:
-        TeamsGenieBot: An instantiated TeamsGenieBot handling activities.
-    """
-    return TeamsGenieBot()
-
-
-# Create the agent based on configuration
-AGENT = create_agent()
+AGENT = TeamsGenieBot()
 
 
 @asynccontextmanager
@@ -106,8 +92,6 @@ async def messages(req: Request):
     Returns:
         Response: The HTTP response from the Bot Framework adapter.
     """
-    # adapter: CloudAdapter = req.app["adapter"]
-    # return await adapter.process(req, AGENT)
     return await start_agent_process(
         req,
         AGENT,

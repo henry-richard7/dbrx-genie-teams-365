@@ -4,9 +4,10 @@ This module provides the `FileCardHandler` which builds the UI and logic for
 sending and receiving file consent cards to export large query results as Excel files.
 """
 
-import base64
+import logging
 from datetime import datetime
 from io import BytesIO
+from uuid import uuid4
 
 from microsoft_agents.hosting.core import TurnContext
 from microsoft_agents.activity import (
@@ -28,7 +29,15 @@ class FileCardHandler:
 
     It creates and processes FileConsentCards, allowing the bot to send large
     Databricks SQL query results as Excel file attachments directly in the chat.
+
+    File bytes are stored in a class-level in-memory cache (``_pending_files``) keyed
+    by a UUID so that the FileConsentCard payload stays small and Teams never rejects
+    it with a 413. The cache entry is removed after the user accepts or declines.
     """
+
+    # Class-level cache shared across all FileCardHandler instances.
+    # Maps file_id (str UUID) -> raw bytes.
+    _pending_files: dict = {}
 
     async def _file_upload_failed(self, turn_context: TurnContext, error: str):
         """Sends an error message to the user if a file upload fails.
@@ -65,9 +74,7 @@ class FileCardHandler:
         )
 
         as_attachment = Attachment(
-            # content=download_card.serialize(),
             content=download_card,
-            # content_type=ContentType.FILE_INFO_CARD,
             content_type="application/vnd.microsoft.teams.card.file.info",
             name=upload_info.get("name"),
             content_url=upload_info.get("contentUrl"),
@@ -89,26 +96,32 @@ class FileCardHandler:
     ):
         """Generates and sends a FileConsentCard to prompt the user for download permission.
 
+        The file bytes are stored in the class-level :attr:`_pending_files` cache under
+        a UUID key. Only the UUID is sent in the card context, keeping the payload
+        small and avoiding ``413 Request Entity Too Large`` errors from Teams.
+
         Args:
             turn_context (TurnContext): The context object for this turn.
             filename (str): The name of the file to be sent (e.g., 'results.xlsx').
             file_size (int): The size of the file in bytes.
             file_bytes (BytesIO): The in-memory buffer containing the file data.
         """
-        base_64_encoded_bytes = base64.b64encode(file_bytes.getvalue()).decode("utf-8")
-        consent_context = {"filename": filename, "file_bytes": base_64_encoded_bytes}
+        file_id = str(uuid4())
+        # Cache raw bytes — retrieved on accept, discarded on accept/decline
+        FileCardHandler._pending_files[file_id] = file_bytes.getvalue()
+
+        # Lightweight context — only a UUID reference, no encoded payload
+        consent_context = {"filename": filename, "file_id": file_id}
 
         file_card = FileConsentCard(
-            description="I want to send the result of your query as Excel flile.",
+            description="I want to send the result of your query as an Excel file.",
             size_in_bytes=file_size,
             accept_context=consent_context,
             decline_context=consent_context,
         )
 
         as_attachment = Attachment(
-            # content=file_card.serialize(),
             content=file_card,
-            # content_type=ContentType.FILE_CONSENT_CARD,
             content_type="application/vnd.microsoft.teams.card.file.consent",
             name=filename,
         )

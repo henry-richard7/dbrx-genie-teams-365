@@ -16,6 +16,7 @@ from handlers.file_card_handler import FileCardHandler
 from database.database import Database
 from database.db_models import UserSelection
 from utils.llm_summarizer import LlmSummarizer
+from utils.chart_card_generator import AdaptiveCardChartGenerator
 
 COMMAND_LIST_SPACES = "list genie spaces"
 logger = logging.getLogger(__name__)
@@ -40,6 +41,7 @@ class MessageHandler:
         self.genie_list_handler = GenieListHandler(database)
         self.file_card_handler = FileCardHandler()
         self.llm_summarizer = LlmSummarizer()
+        self.chart_card_generator = AdaptiveCardChartGenerator()
 
     async def _get_databricks_credentials_kwargs(self, turn_context: TurnContext, send_prompt: bool = True, force_prompt: bool = False) -> dict | None:
         """Helper to resolve Databricks credentials. Returns a dict of kwargs or None if missing."""
@@ -314,26 +316,13 @@ class MessageHandler:
             try:
                 logger.debug("Generating summary from data via llm_summarizer.")
 
-                client_id = None
-                client_secret = None
-                has_global_token = bool(os.environ.get("DATABRICKS_TOKEN"))
-                has_global_oauth = bool(os.environ.get("DATABRICKS_CLIENT_ID") and os.environ.get("DATABRICKS_CLIENT_SECRET"))
-                if not (has_global_token or has_global_oauth):
-                    # user's scope dbrx_creds should be defined from earlier in handle_genie_question
-                    dbrx_creds = getattr(
-                        turn_context.turn_state, "get", lambda x, y=None: None
-                    )("databricks_creds")
-                    if dbrx_creds:
-                        client_id = dbrx_creds.databricks_client_id
-                        client_secret = dbrx_creds.databricks_client_secret
-
                 summary_result = await asyncio.to_thread(
                     self.llm_summarizer.summarize,
                     genie_response["columns"]["columns"],
                     genie_response["data"]["data_array"],
                     question,
-                    client_id,
-                    client_secret,
+                    creds_kwargs.get("client_id"),
+                    creds_kwargs.get("client_secret"),
                 )
                 
                 if isinstance(summary_result, dict):
@@ -345,23 +334,26 @@ class MessageHandler:
 
                 summary_card.add_text(summary_text)
 
-                # Add chart if enabled and recommended
-                if chart_type and os.environ.get("ENABLE_CHARTS", "inactive").lower() == "active":
+                # Generate chart card via dedicated LLM agent when charts are enabled
+                if os.environ.get("ENABLE_CHARTS", "inactive").lower() == "active":
                     try:
-                        logger.debug(f"Attempting to render chart: {chart_type}")
-                        chart_card = AdaptiveCardTemplate()
-                        # Slice data to top 15 rows for charts to improve readability
-                        chart_data = {"data_array": genie_response["data"]["data_array"][:15]}
-                        if chart_type == "Chart.VerticalBar":
-                            chart_card.add_vertical_bar_chart(chart_data, genie_response["columns"])
-                        elif chart_type == "Chart.Donut":
-                            chart_card.add_donut_chart(chart_data, genie_response["columns"])
-                        elif chart_type == "Chart.VerticalBar.Grouped":
-                            chart_card.add_grouped_bar_chart(chart_data, genie_response["columns"])
-                        elif chart_type == "Chart.HorizontalBar.Stacked":
-                            chart_card.add_stacked_horizontal_bar_chart(chart_data, genie_response["columns"])
+                        logger.debug("Requesting chart Adaptive Card from AdaptiveCardChartGenerator.")
+                        # Slice to top 15 rows for readability; LLM handles schema selection
+                        chart_data_slice = genie_response["data"]["data_array"][:15]
+                        chart_card = await asyncio.to_thread(
+                            self.chart_card_generator.generate_chart_card,
+                            genie_response["columns"]["columns"],
+                            chart_data_slice,
+                            creds_kwargs.get("client_id"),
+                            creds_kwargs.get("client_secret"),
+                        )
+                        if chart_card:
+                            logger.debug(
+                                f"Chart card generated. Chart type: "
+                                f"{chart_card.get('body', [{}])[0].get('type', 'unknown')}"
+                            )
                     except Exception as ce:
-                        logger.error(f"Failed to render chart {chart_type}: {ce}", exc_info=True)
+                        logger.error(f"Failed to generate chart card: {ce}", exc_info=True)
                         chart_card = None
             except Exception as e:
                 logger.error(f"Failed to generate summary: {e}", exc_info=True)
@@ -410,7 +402,8 @@ class MessageHandler:
 
         if chart_card:
             logger.debug("Sending Chart Adaptive Card response to user.")
-            chart_attachment = CardFactory.adaptive_card(chart_card.get_adaptive_card())
+            # chart_card is a raw dict produced by AdaptiveCardChartGenerator
+            chart_attachment = CardFactory.adaptive_card(chart_card)
             await turn_context.send_activity(MessageFactory.attachment(chart_attachment))
 
         if table_card:
@@ -509,7 +502,12 @@ class MessageHandler:
                         return
                     list_spaces_kwargs = {"user_id": user_id, **creds_kwargs}
 
-                    logger.debug("Calling GenieListHandler to fetching spaces.")
+                    # Always clear the cache on explicit user request so newly added
+                    # Genie spaces are visible immediately without a manual refresh.
+                    logger.debug(f"Clearing cached spaces for user {user_id} before explicit list command.")
+                    await self.database.clear_user_space_mappings(user_id)
+
+                    logger.debug("Calling GenieListHandler to fetch spaces.")
                     response = await BotUtilities.keep_typing_while(
                         turn_context,
                         self.genie_list_handler.handle_list_spaces,

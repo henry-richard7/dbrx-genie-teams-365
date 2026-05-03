@@ -6,7 +6,6 @@ and orchestrates responses using various handlers.
 """
 
 from os import environ
-import base64
 import logging
 import aiohttp
 
@@ -111,12 +110,21 @@ class TeamsGenieBot(TeamsActivityHandler):
         logger.info("on_teams_file_consent_accept triggered.")
         await turn_context.delete_activity(turn_context.activity.reply_to_id)
 
-        file_name = file_consent_card_response["context"]["filename"]
-        logger.debug(f"Decoding file bytes for: {file_name}")
-        file_bytes = base64.b64decode(
-            file_consent_card_response["context"]["file_bytes"]
-        )
+        context = file_consent_card_response["context"]
+        file_name = context.get("filename", "unknown")
+        file_id = context.get("file_id")
+
+        if not file_id or file_id not in FileCardHandler._pending_files:
+            logger.error(f"File accept received but file_id '{file_id}' not found in cache.")
+            await self.file_card_handler._file_upload_failed(
+                turn_context, "File data not found. It may have expired — please ask your question again."
+            )
+            return
+
+        # Retrieve and immediately evict the cached bytes to free memory
+        file_bytes = FileCardHandler._pending_files.pop(file_id)
         file_size = len(file_bytes)
+        logger.debug(f"Retrieved {file_size} bytes for file '{file_name}' from cache.")
 
         headers = {
             "Content-Length": f"{file_size}",
@@ -172,6 +180,13 @@ class TeamsGenieBot(TeamsActivityHandler):
 
         context = file_consent_card_response["context"]
         file_name = context.get("filename", "unknown")
+        file_id = context.get("file_id")
+
+        # Free cached bytes so they don't linger in memory indefinitely
+        if file_id:
+            FileCardHandler._pending_files.pop(file_id, None)
+            logger.debug(f"Evicted cached bytes for file_id '{file_id}' on decline.")
+
         logger.debug(f"User declined upload for file: {file_name}")
         reply = turn_context.activity.create_reply(
             text=f"Declined. We won't upload file <b>{file_name}</b>.",
@@ -221,33 +236,7 @@ class TeamsGenieBot(TeamsActivityHandler):
         )
         user_groups = await self.database.get_security_group_mapping(user_group_ids)
 
-        if user_groups:
-            turn_context.turn_state["user_groups"] = user_groups
-
-            user_id = turn_context.activity.from_property.id
-            user_selection = await self.database.get_user_selection(user_id)
-            selected_group = None
-            if user_selection and getattr(user_selection, "user_group_id", None):
-                for group in user_groups:
-                    if group.group_id == user_selection.user_group_id:
-                        selected_group = group
-                        break
-
-            if selected_group:
-                logger.info(
-                    f"User mapped to {len(user_groups)} groups. Setting creds to previously selected group: {getattr(selected_group, 'group_name', selected_group.group_id)}"
-                )
-                turn_context.turn_state["databricks_creds"] = selected_group
-            elif len(user_groups) == 1:
-                logger.info(
-                    f"User mapped to 1 group. Setting default creds to: {getattr(user_groups[0], 'group_name', user_groups[0].group_id)}"
-                )
-                turn_context.turn_state["databricks_creds"] = user_groups[0]
-            else:
-                logger.info(
-                    f"User mapped to {len(user_groups)} groups. Prompts will occur in message handler."
-                )
-        else:
+        if not user_groups:
             logger.warning(
                 f"User {user_email} is not part of any configured security group."
             )
@@ -255,6 +244,32 @@ class TeamsGenieBot(TeamsActivityHandler):
                 "Sorry, you're not part of any security group for accessing Databricks. If you believe this is an error, please contact your administrator."
             )
             return
+
+        turn_context.turn_state["user_groups"] = user_groups
+
+        user_id = turn_context.activity.from_property.id
+        user_selection = await self.database.get_user_selection(user_id)
+        selected_group = None
+        if user_selection and getattr(user_selection, "user_group_id", None):
+            for group in user_groups:
+                if group.group_id == user_selection.user_group_id:
+                    selected_group = group
+                    break
+
+        if selected_group:
+            logger.info(
+                f"User mapped to {len(user_groups)} groups. Setting creds to previously selected group: {getattr(selected_group, 'group_name', selected_group.group_id)}"
+            )
+            turn_context.turn_state["databricks_creds"] = selected_group
+        elif len(user_groups) == 1:
+            logger.info(
+                f"User mapped to 1 group. Setting default creds to: {getattr(user_groups[0], 'group_name', user_groups[0].group_id)}"
+            )
+            turn_context.turn_state["databricks_creds"] = user_groups[0]
+        else:
+            logger.info(
+                f"User mapped to {len(user_groups)} groups. Prompts will occur in message handler."
+            )
 
         logger.debug("Delegating message processing to message_handler.")
         await self.message_handler.process_message(turn_context)
