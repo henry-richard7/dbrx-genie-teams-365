@@ -69,6 +69,7 @@ Data format: each item uses "legend" (string) and "value" (number).
   "$schema": "https://adaptivecards.io/schemas/adaptive-card.json",
   "type": "AdaptiveCard",
   "version": "1.5",
+  "msteams": {"width": "full"},
   "body": [
     {
       "type": "Chart.Pie",
@@ -93,6 +94,7 @@ Data format: each item uses "x" (string) and "y" (number).
   "$schema": "https://adaptivecards.io/schemas/adaptive-card.json",
   "type": "AdaptiveCard",
   "version": "1.5",
+  "msteams": {"width": "full"},
   "body": [
     {
       "type": "Chart.VerticalBar",
@@ -120,6 +122,7 @@ Data format: each series has "legend" (string) and "values" array of {x, y} obje
   "$schema": "https://adaptivecards.io/schemas/adaptive-card.json",
   "type": "AdaptiveCard",
   "version": "1.5",
+  "msteams": {"width": "full"},
   "body": [
     {
       "type": "Chart.Line",
@@ -152,6 +155,7 @@ Data format: outer array has "title" per row; inner "data" array has "legend", "
   "$schema": "https://adaptivecards.io/schemas/adaptive-card.json",
   "type": "AdaptiveCard",
   "version": "1.5",
+  "msteams": {"width": "full"},
   "body": [
     {
       "type": "Chart.HorizontalBar.Stacked",
@@ -184,6 +188,7 @@ Requires a "value" (current value) and "segments" array defining ranges.
   "$schema": "https://adaptivecards.io/schemas/adaptive-card.json",
   "type": "AdaptiveCard",
   "version": "1.5",
+  "msteams": {"width": "full"},
   "body": [
     {
       "type": "Chart.Gauge",
@@ -267,7 +272,9 @@ class AdaptiveCardChartGenerator:
         """
         table_text = LlmSummarizer.dataframe_to_text(columns, data)
         if not table_text:
-            logger.debug("chart_card_generator: empty table, skipping chart generation.")
+            logger.debug(
+                "chart_card_generator: empty table, skipping chart generation."
+            )
             return None
 
         model = self._get_or_create_model(client_id, client_secret)

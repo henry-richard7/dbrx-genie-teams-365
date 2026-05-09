@@ -88,6 +88,8 @@ class LlmSummarizer:
                 )
                 del self._models[cache_key]
                 del self._model_created_at[cache_key]
+
+        if cache_key not in self._models:
             kwargs = {
                 "model": llm_endpoint,
                 "temperature": 0.1,
