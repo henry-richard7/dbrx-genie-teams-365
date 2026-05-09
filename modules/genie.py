@@ -120,9 +120,7 @@ class Genie:
             )
 
             # Format response based on content type
-            response_data = await self._format_response(
-                query_result, message_content
-            )
+            response_data = await self._format_response(query_result, message_content)
 
             return {"response": response_data, "conversation_id": conversation_id}
 
@@ -172,9 +170,7 @@ class Genie:
             Dict[str, Any]: A formatted dictionary containing either SQL data or text response.
         """
         if query_result and query_result.statement_response:
-            return await self._format_query_response(
-                query_result, message_content
-            )
+            return await self._format_query_response(query_result, message_content)
 
         # Handle text attachments
         if message_content.attachments:

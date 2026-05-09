@@ -15,7 +15,9 @@ class AdaptiveCardTemplate:
             "body": [],
         }
 
-    def _classify_columns(self, columns: dict) -> tuple[list[int], list[int], list[int], dict[int, str]]:
+    def _classify_columns(
+        self, columns: dict
+    ) -> tuple[list[int], list[int], list[int], dict[int, str]]:
         """Helper to classify columns into ID, String, and Numeric positions, and build a position-to-name map."""
         id_columns = []
         string_columns = []
@@ -30,7 +32,7 @@ class AdaptiveCardTemplate:
                 string_columns.append(col["position"])
             elif col["type_name"] in ["LONG", "INT", "BIGINT", "DOUBLE", "FLOAT"]:
                 numeric_columns.append(col["position"])
-                
+
         return id_columns, string_columns, numeric_columns, column_map
 
     def add_text(
@@ -171,7 +173,9 @@ class AdaptiveCardTemplate:
             "showBarValues": show_bar_values,
         }
 
-        id_columns, string_columns, numeric_columns, column_map = self._classify_columns(columns)
+        id_columns, string_columns, numeric_columns, column_map = (
+            self._classify_columns(columns)
+        )
 
         # Find x and y column names
         x_column_name = None
@@ -207,7 +211,9 @@ class AdaptiveCardTemplate:
 
         self.root["body"].append(chart_base)
 
-    def add_donut_chart(self, data: dict, columns: dict, chart_type: str = "Chart.Donut"):
+    def add_donut_chart(
+        self, data: dict, columns: dict, chart_type: str = "Chart.Donut"
+    ):
         """Appends a Donut Chart to the Adaptive Card.
 
         Automatically detects legend (string) and value (numeric) columns from the metadata.
@@ -223,7 +229,9 @@ class AdaptiveCardTemplate:
             "type": chart_type,
         }
 
-        id_columns, string_columns, numeric_columns, column_map = self._classify_columns(columns)
+        id_columns, string_columns, numeric_columns, column_map = (
+            self._classify_columns(columns)
+        )
 
         # Find x and y column names
         x_column_name = None
@@ -280,7 +288,9 @@ class AdaptiveCardTemplate:
             "data": [],
         }
 
-        id_columns, string_columns, numeric_columns, column_map = self._classify_columns(columns)
+        id_columns, string_columns, numeric_columns, column_map = (
+            self._classify_columns(columns)
+        )
 
         if len(string_columns) < 2 or not numeric_columns:
             return  # not enough columns
@@ -351,7 +361,9 @@ class AdaptiveCardTemplate:
             "data": [],
         }
 
-        id_columns, string_columns, numeric_columns, column_map = self._classify_columns(columns)
+        id_columns, string_columns, numeric_columns, column_map = (
+            self._classify_columns(columns)
+        )
 
         # We need at least one string column for legend, one for category (x), one numeric
         if len(string_columns) < 2 or not numeric_columns:

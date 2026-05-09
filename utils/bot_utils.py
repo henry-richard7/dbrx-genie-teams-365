@@ -30,16 +30,19 @@ class BotUtilities:
         Returns:
             Any: The result returned by the executed function.
         """
+
         async def keep_typing():
             try:
                 while True:
-                    await turn_context.send_activity(Activity(type=ActivityTypes.typing))
+                    await turn_context.send_activity(
+                        Activity(type=ActivityTypes.typing)
+                    )
                     await asyncio.sleep(10)
             except asyncio.CancelledError:
                 pass
 
         typing_task = asyncio.create_task(keep_typing())
-        
+
         try:
             result = await func(*args, **kwargs)
             return result

@@ -115,9 +115,12 @@ class TeamsGenieBot(TeamsActivityHandler):
         file_id = context.get("file_id")
 
         if not file_id or file_id not in FileCardHandler._pending_files:
-            logger.error(f"File accept received but file_id '{file_id}' not found in cache.")
+            logger.error(
+                f"File accept received but file_id '{file_id}' not found in cache."
+            )
             await self.file_card_handler._file_upload_failed(
-                turn_context, "File data not found. It may have expired — please ask your question again."
+                turn_context,
+                "File data not found. It may have expired — please ask your question again.",
             )
             return
 
@@ -205,8 +208,11 @@ class TeamsGenieBot(TeamsActivityHandler):
         """
         logger.info("on_message_activity triggered.")
         has_global_token = bool(environ.get("DATABRICKS_TOKEN"))
-        has_global_oauth = bool(environ.get("DATABRICKS_CLIENT_ID") and environ.get("DATABRICKS_CLIENT_SECRET"))
-        
+        has_global_oauth = bool(
+            environ.get("DATABRICKS_CLIENT_ID")
+            and environ.get("DATABRICKS_CLIENT_SECRET")
+        )
+
         if has_global_token or has_global_oauth:
             # If global Databricks credentials are provided, bypass group-based access control.
             logger.debug(

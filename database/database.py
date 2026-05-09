@@ -15,6 +15,7 @@ class Database:
     Provides methods to manage database tables, read/write user configuration,
     Genie space mappings, and security group resolution for multi-tenant access.
     """
+
     def __init__(self, db_url: str = None):
         """Initializes the Database instance and async engine.
 
@@ -22,7 +23,9 @@ class Database:
             db_url (str, optional): The database connection URL. If not provided, it reads from the environment variable 'DATABASE_URL', defaulting to the local SQLite DB.
         """
         if db_url is None:
-            db_url = os.environ.get("DATABASE_URL", "sqlite+aiosqlite:///teams_genie_bot.db")
+            db_url = os.environ.get(
+                "DATABASE_URL", "sqlite+aiosqlite:///teams_genie_bot.db"
+            )
         logger.debug(f"Initializing Database with URL: {db_url}")
         self.engine = create_async_engine(db_url)
 
@@ -97,9 +100,7 @@ class Database:
             user_id (str): The Microsoft Teams user ID.
             spaces (list[dict]): A list of dicts with keys 'space_id', 'space_name', 'description'.
         """
-        logger.debug(
-            f"Bulk-inserting {len(spaces)} space mappings for user {user_id}"
-        )
+        logger.debug(f"Bulk-inserting {len(spaces)} space mappings for user {user_id}")
         async with AsyncSession(self.engine) as session:
             mappings = [
                 GenieSpace(
@@ -169,7 +170,9 @@ class Database:
             logger.info(f"Successfully added user selection for {user_id}")
             return selection
 
-    async def update_user_scope(self, user_id: str, user_group_id: str) -> UserSelection | None:
+    async def update_user_scope(
+        self, user_id: str, user_group_id: str
+    ) -> UserSelection | None:
         """Updates the security group scope for a user's selection.
 
         Args:
@@ -283,7 +286,9 @@ class Database:
             logger.debug(f"Found {len(mappings)} configured security group mappings.")
             return mappings
 
-    async def get_scope_details(self, user_group_id: str) -> SecurityGroupMapping | None:
+    async def get_scope_details(
+        self, user_group_id: str
+    ) -> SecurityGroupMapping | None:
         """Retrieves Databricks credentials for a single security group ID.
 
         Args:

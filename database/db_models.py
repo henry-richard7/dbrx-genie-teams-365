@@ -11,6 +11,7 @@ class GenieSpace(SQLModel, table=True):
         space_name (str): The human-readable name of the Genie Space.
         description (Optional[str]): An optional description of the space.
     """
+
     user_id: str = Field(
         default=None, max_length=255, sa_column=Column(TEXT, primary_key=True)
     )
@@ -29,6 +30,7 @@ class UserSelection(SQLModel, table=True):
         conversation_id (Optional[str]): The active conversation ID in Databricks Genie.
         user_group_id (Optional[str]): The selected security group ID for Databricks credentials.
     """
+
     user_id: str = Field(default=None, primary_key=True, max_length=255)
     space_id: Optional[str] = Field(default=None, max_length=255)
     space_name: Optional[str] = Field(default=None, max_length=255)
@@ -45,6 +47,7 @@ class SecurityGroupMapping(SQLModel, table=True):
         databricks_client_id (Optional[str]): The OAuth client ID for the group.
         databricks_client_secret (Optional[str]): The OAuth client secret for the group.
     """
+
     group_id: str = Field(default=None, primary_key=True, max_length=255)
     group_name: str = Field(default=None, max_length=255)
     databricks_client_id: Optional[str] = Field(default=None, max_length=255)

@@ -67,7 +67,11 @@ class GenieListHandler:
                 await self.db.add_user_space_mappings_bulk(
                     user_id=user_id,
                     spaces=[
-                        {"space_id": s.space_id, "space_name": s.title, "description": s.description}
+                        {
+                            "space_id": s.space_id,
+                            "space_name": s.title,
+                            "description": s.description,
+                        }
                         for s in spaces
                     ],
                 )

@@ -46,18 +46,25 @@ class LlmSummarizer:
             return ""
 
         headers = [str(col["name"]) for col in columns]
-        
+
         # Build Markdown table
         header_row = "| " + " | ".join(headers) + " |"
         separator = "| " + " | ".join("---" for _ in headers) + " |"
-        
+
         rows = []
         for row in data:
             rows.append("| " + " | ".join(str(item) for item in row) + " |")
-            
+
         return "\n".join([header_row, separator] + rows)
 
-    def summarize(self, columns: list, data: list, question: str, client_id: str = None, client_secret: str = None) -> dict:
+    def summarize(
+        self,
+        columns: list,
+        data: list,
+        question: str,
+        client_id: str = None,
+        client_secret: str = None,
+    ) -> dict:
         """Summarizes the given dataset using a configured language model.
 
         Converts the data to a Markdown table and prompts the LLM to return a structured
@@ -112,18 +119,24 @@ class LlmSummarizer:
                     if cache_key not in self._workspace_clients:
                         if client_id and client_secret:
                             self._workspace_clients[cache_key] = WorkspaceClient(
-                                host=host, client_id=client_id, client_secret=client_secret
+                                host=host,
+                                client_id=client_id,
+                                client_secret=client_secret,
                             )
                         else:
-                            self._workspace_clients[cache_key] = WorkspaceClient(host=host)
-                    
+                            self._workspace_clients[cache_key] = WorkspaceClient(
+                                host=host
+                            )
+
                     w = self._workspace_clients[cache_key]
                     creds = w.config.authenticate()
                     if creds and isinstance(creds, dict) and "Authorization" in creds:
-                        kwargs["api_key"] = creds.get("Authorization").replace("Bearer ", "")
+                        kwargs["api_key"] = creds.get("Authorization").replace(
+                            "Bearer ", ""
+                        )
                     elif w.config.token:
                         kwargs["api_key"] = w.config.token
-                    
+
                     if "base_url" not in kwargs and host:
                         kwargs["base_url"] = f"{host.rstrip('/')}/serving-endpoints"
                 except Exception as e:
@@ -170,7 +183,7 @@ class LlmSummarizer:
             logger.warning(f"LLM API failed or rate limit reached: {e}")
             return {
                 "text": "⚠️ **AI Insights Unavailable**\n\nThe AI assistant is currently experiencing high demand or reached its rate limits. Your raw data results are provided below.",
-                "chart": None
+                "chart": None,
             }
 
         if hasattr(response, "content"):
@@ -191,7 +204,7 @@ class LlmSummarizer:
         # Parse the JSON response
         try:
             parsed_response = json.loads(response_content)
-            
+
             # Extract standard dict response
             if isinstance(parsed_response, dict) and "text" in parsed_response:
                 return parsed_response
@@ -199,11 +212,18 @@ class LlmSummarizer:
             # Handle Databricks AI Gateway legacy list format
             if isinstance(parsed_response, list):
                 for item in parsed_response:
-                    if isinstance(item, dict) and item.get("type") == "text" and "text" in item:
+                    if (
+                        isinstance(item, dict)
+                        and item.get("type") == "text"
+                        and "text" in item
+                    ):
                         # Try to parse the inner text as JSON
                         try:
                             inner_parsed = json.loads(item["text"])
-                            if isinstance(inner_parsed, dict) and "text" in inner_parsed:
+                            if (
+                                isinstance(inner_parsed, dict)
+                                and "text" in inner_parsed
+                            ):
                                 return inner_parsed
                         except json.JSONDecodeError:
                             return {"text": item["text"], "chart": None}

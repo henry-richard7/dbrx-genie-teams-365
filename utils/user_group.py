@@ -11,7 +11,7 @@ class UserGroup:
     This class handles authentication with the Microsoft Graph API using
     client credentials and fetches all transitive group memberships for a user.
     """
-    
+
     def __init__(self):
         self._session = None
 
