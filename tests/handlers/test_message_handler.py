@@ -153,3 +153,198 @@ async def test_handle_space_selection(mock_database, mock_turn_context):
         mock_turn_context.send_activity.assert_called_once_with(
             "✅ Selected space: **Space 1**. You can now ask questions!"
         )
+
+
+@pytest.mark.asyncio
+async def test_handle_genie_question_success(mock_database, mock_turn_context, monkeypatch):
+    monkeypatch.setenv("DATABRICKS_TOKEN", "test-token")
+    mock_turn_context.activity.from_property.name = "Bob Smith"
+
+    user_sel = UserSelection(user_id="user_123", space_id="s1", space_name="Space 1")
+    
+    mock_database.add_query_log = AsyncMock()
+
+    mock_genie_instance = MagicMock()
+    mock_genie_instance.ask_genie = AsyncMock(return_value={
+        "response": {
+            "message": "Here is the response",
+            "query": "SELECT * FROM sales",
+            "data": {"row_count": 5, "data_array": [[1]]},
+            "columns": {"column_count": 1, "columns": [{"name": "col1", "type": {"name": "INT"}}]}
+        },
+        "conversation_id": "conv_999"
+    })
+
+    with (
+        patch("handlers.message_handler.Genie", return_value=mock_genie_instance),
+        patch("handlers.message_handler.FileCardHandler"),
+        patch("handlers.message_handler.LlmSummarizer") as mock_summarizer_cls,
+    ):
+        mock_summarizer = mock_summarizer_cls.return_value
+        mock_summarizer.summarize = MagicMock(return_value="Summary Text")
+
+        handler = MessageHandler(mock_database)
+
+        await handler.handle_genie_question(
+            mock_turn_context, "user_123", "what is total sales?", user_sel
+        )
+
+        mock_genie_instance.ask_genie.assert_called_once_with(
+            question="what is total sales?",
+            space_id="s1",
+            conversation_id=None
+        )
+
+        mock_database.add_query_log.assert_called_once()
+        kwargs = mock_database.add_query_log.call_args[1]
+        assert kwargs["user_id"] == "user_123"
+        assert kwargs["question"] == "what is total sales?"
+        assert kwargs["user_name"] == "Bob Smith"
+        assert kwargs["scope_name"] is None
+        assert kwargs["space_name"] == "Space 1"
+        assert kwargs["space_id"] == "s1"
+        assert kwargs["sql_query"] == "SELECT * FROM sales"
+        assert kwargs["exception"] is None
+        assert kwargs["start_time"] is not None
+        assert kwargs["end_time"] is not None
+
+
+@pytest.mark.asyncio
+async def test_handle_genie_question_error_response(mock_database, mock_turn_context, monkeypatch):
+    monkeypatch.setenv("DATABRICKS_TOKEN", "test-token")
+    mock_turn_context.activity.from_property.name = "Bob Smith"
+
+    user_sel = UserSelection(user_id="user_123", space_id="s1", space_name="Space 1")
+    
+    mock_database.add_query_log = AsyncMock()
+
+    mock_genie_instance = MagicMock()
+    mock_genie_instance.ask_genie = AsyncMock(return_value={
+        "error": "Workspace client failed connection"
+    })
+
+    with (
+        patch("handlers.message_handler.Genie", return_value=mock_genie_instance),
+        patch("handlers.message_handler.FileCardHandler"),
+        patch("handlers.message_handler.LlmSummarizer"),
+    ):
+        handler = MessageHandler(mock_database)
+
+        await handler.handle_genie_question(
+            mock_turn_context, "user_123", "what is total sales?", user_sel
+        )
+
+        mock_database.add_query_log.assert_called_once()
+        kwargs = mock_database.add_query_log.call_args[1]
+        assert kwargs["user_id"] == "user_123"
+        assert kwargs["question"] == "what is total sales?"
+        assert kwargs["exception"] == "Workspace client failed connection"
+        assert kwargs["sql_query"] is None
+
+
+@pytest.mark.asyncio
+async def test_handle_genie_question_exception(mock_database, mock_turn_context, monkeypatch):
+    monkeypatch.setenv("DATABRICKS_TOKEN", "test-token")
+    mock_turn_context.activity.from_property.name = "Bob Smith"
+
+    user_sel = UserSelection(user_id="user_123", space_id="s1", space_name="Space 1")
+    
+    mock_database.add_query_log = AsyncMock()
+
+    mock_genie_instance = MagicMock()
+    mock_genie_instance.ask_genie = AsyncMock(side_effect=ValueError("Unexpected DB error"))
+
+    with (
+        patch("handlers.message_handler.Genie", return_value=mock_genie_instance),
+        patch("handlers.message_handler.FileCardHandler"),
+        patch("handlers.message_handler.LlmSummarizer"),
+    ):
+        handler = MessageHandler(mock_database)
+
+        with pytest.raises(ValueError, match="Unexpected DB error"):
+            await handler.handle_genie_question(
+                mock_turn_context, "user_123", "what is total sales?", user_sel
+            )
+
+        mock_database.add_query_log.assert_called_once()
+        kwargs = mock_database.add_query_log.call_args[1]
+        assert kwargs["user_id"] == "user_123"
+        assert kwargs["question"] == "what is total sales?"
+        assert kwargs["exception"] == "Unexpected DB error"
+        assert kwargs["sql_query"] is None
+
+
+@pytest.mark.asyncio
+async def test_handle_genie_question_insights_disabled(mock_database, mock_turn_context, monkeypatch):
+    monkeypatch.setenv("DATABRICKS_TOKEN", "test-token")
+    monkeypatch.setenv("GET_AI_INSIGHTS", "false")
+    mock_turn_context.activity.from_property.name = "Bob Smith"
+
+    user_sel = UserSelection(user_id="user_123", space_id="s1", space_name="Space 1")
+    mock_database.add_query_log = AsyncMock()
+
+    mock_genie_instance = MagicMock()
+    mock_genie_instance.ask_genie = AsyncMock(return_value={
+        "response": {
+            "message": "Here is the response",
+            "query": "SELECT * FROM sales",
+            "data": {"row_count": 5, "data_array": [[1]]},
+            "columns": {"column_count": 1, "columns": [{"name": "col1", "type": {"name": "INT"}}]}
+        },
+        "conversation_id": "conv_999"
+    })
+
+    with (
+        patch("handlers.message_handler.Genie", return_value=mock_genie_instance),
+        patch("handlers.message_handler.FileCardHandler"),
+        patch("handlers.message_handler.LlmSummarizer") as mock_summarizer_cls,
+    ):
+        mock_summarizer = mock_summarizer_cls.return_value
+        mock_summarizer.summarize = MagicMock(return_value="Summary Text")
+
+        handler = MessageHandler(mock_database)
+
+        await handler.handle_genie_question(
+            mock_turn_context, "user_123", "what is total sales?", user_sel
+        )
+
+        mock_summarizer.summarize.assert_not_called()
+
+
+@pytest.mark.asyncio
+async def test_handle_genie_question_insights_enabled(mock_database, mock_turn_context, monkeypatch):
+    monkeypatch.setenv("DATABRICKS_TOKEN", "test-token")
+    monkeypatch.setenv("GET_AI_INSIGHTS", "true")
+    mock_turn_context.activity.from_property.name = "Bob Smith"
+
+    user_sel = UserSelection(user_id="user_123", space_id="s1", space_name="Space 1")
+    mock_database.add_query_log = AsyncMock()
+
+    mock_genie_instance = MagicMock()
+    mock_genie_instance.ask_genie = AsyncMock(return_value={
+        "response": {
+            "message": "Here is the response",
+            "query": "SELECT * FROM sales",
+            "data": {"row_count": 5, "data_array": [[1]]},
+            "columns": {"column_count": 1, "columns": [{"name": "col1", "type": {"name": "INT"}}]}
+        },
+        "conversation_id": "conv_999"
+    })
+
+    with (
+        patch("handlers.message_handler.Genie", return_value=mock_genie_instance),
+        patch("handlers.message_handler.FileCardHandler"),
+        patch("handlers.message_handler.LlmSummarizer") as mock_summarizer_cls,
+    ):
+        mock_summarizer = mock_summarizer_cls.return_value
+        mock_summarizer.summarize = MagicMock(return_value="Summary Text")
+
+        handler = MessageHandler(mock_database)
+
+        await handler.handle_genie_question(
+            mock_turn_context, "user_123", "what is total sales?", user_sel
+        )
+
+        mock_summarizer.summarize.assert_called_once()
+
+

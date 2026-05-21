@@ -264,12 +264,12 @@ class TeamsGenieBot(TeamsActivityHandler):
 
         if selected_group:
             logger.info(
-                f"User mapped to {len(user_groups)} groups. Setting creds to previously selected group: {getattr(selected_group, 'group_name', selected_group.group_id)}"
+                f"User mapped to {len(user_groups)} groups. Setting creds to previously selected group: {selected_group.group_name or selected_group.group_id}"
             )
             turn_context.turn_state["databricks_creds"] = selected_group
         elif len(user_groups) == 1:
             logger.info(
-                f"User mapped to 1 group. Setting default creds to: {getattr(user_groups[0], 'group_name', user_groups[0].group_id)}"
+                f"User mapped to 1 group. Setting default creds to: {user_groups[0].group_name or user_groups[0].group_id}"
             )
             turn_context.turn_state["databricks_creds"] = user_groups[0]
         else:

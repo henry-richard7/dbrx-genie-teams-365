@@ -5,6 +5,7 @@ description = "A Microsoft Teams agent that can interact with Databricks and oth
 readme = "README.md"
 requires-python = ">=3.13"
 dependencies = [
+    "aioodbc>=0.5.0",
     "aiosqlite>=0.22.1",
     "asyncmy>=0.2.11",
     "databricks-sdk>=0.96.0",

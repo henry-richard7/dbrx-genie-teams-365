@@ -1,10 +1,12 @@
 import asyncio
+from datetime import datetime, timezone
 from io import BytesIO
 import os
 import logging
 
 from thefuzz import fuzz
 from microsoft_agents.hosting.core import TurnContext, MessageFactory, CardFactory
+from microsoft_agents.hosting.teams import TeamsInfo
 import polars
 from uuid import uuid4
 
@@ -73,7 +75,7 @@ class MessageHandler:
             return {
                 "client_id": creds.databricks_client_id,
                 "client_secret": creds.databricks_client_secret,
-                "scope_name": getattr(creds, "group_name", creds.group_id),
+                "scope_name": creds.group_name or creds.group_id,
             }
 
         if send_prompt:
@@ -133,7 +135,7 @@ class MessageHandler:
                 turn_context.turn_state["databricks_creds"] = selected_group
                 await self.database.update_user_scope(user_id, selected_group.group_id)
                 logger.info(
-                    f"User {user_id} successfully selected group: {getattr(selected_group, 'group_name', selected_group.group_id)}"
+                    f"User {user_id} successfully selected group: {selected_group.group_name or selected_group.group_id}"
                 )
 
                 # Clear cached spaces to ensure we fetch for the new scope
@@ -146,9 +148,7 @@ class MessageHandler:
                     user_id=user_id,
                     client_id=selected_group.databricks_client_id,
                     client_secret=selected_group.databricks_client_secret,
-                    scope_name=getattr(
-                        selected_group, "group_name", selected_group.group_id
-                    ),
+                    scope_name=selected_group.group_name or selected_group.group_id,
                 )
                 await turn_context.send_activity(response)
             else:
@@ -268,185 +268,226 @@ class MessageHandler:
         if creds_kwargs is None:
             return
 
-        client_id = creds_kwargs.get("client_id")
-        client_secret = creds_kwargs.get("client_secret")
+        start_time = datetime.now(timezone.utc)
+        user_name = getattr(turn_context.activity.from_property, "name", None)
+        try:
+            members = await TeamsInfo.get_member(turn_context, user_id)
+            user_email = members.email
+        except Exception:
+            user_email = None
 
-        if not client_id and not client_secret:
-            logger.debug("Using global Databricks credentials to initialize Genie.")
-            genie = Genie()
-        else:
-            genie = Genie(client_id=client_id, client_secret=client_secret)
-        sending_excel = False
+        scope_name = creds_kwargs.get("scope_name")
+        sql_query = None
+        exception_str = None
 
-        async def ask():
-            logger.debug(
-                f"Sending question to Genie. Space ID: {user_selection.space_id}, Conversation ID: {user_selection.conversation_id}"
-            )
-            return await genie.ask_genie(
-                question=question,
-                space_id=user_selection.space_id,
-                conversation_id=user_selection.conversation_id,
-            )
+        try:
+            client_id = creds_kwargs.get("client_id")
+            client_secret = creds_kwargs.get("client_secret")
 
-        logger.debug("Waiting for Genie response...")
-        response_data = await BotUtilities.keep_typing_while(turn_context, ask)
+            if not client_id and not client_secret:
+                logger.debug("Using global Databricks credentials to initialize Genie.")
+                genie = Genie()
+            else:
+                genie = Genie(client_id=client_id, client_secret=client_secret)
+            sending_excel = False
 
-        if "error" in response_data:
-            logger.warning(f"Genie returned an error: {response_data['error']}")
-            await turn_context.send_activity(f"❌ {response_data['error']}")
-            return
-
-        # Update conversation_id if changed
-        new_conversation_id = response_data.get("conversation_id")
-        if (
-            new_conversation_id
-            and new_conversation_id != user_selection.conversation_id
-        ):
-            logger.debug(
-                f"Updating conversation ID for user {user_id} to {new_conversation_id}"
-            )
-            await self.database.update_user_selection(
-                user_id,
-                user_selection.space_id,
-                user_selection.space_name,
-                new_conversation_id,
-            )
-
-        # Process response
-        genie_response = response_data.get("response", {})
-        logger.debug("Processing Genie response.")
-
-        # If it's just text
-        if "message" in genie_response and not genie_response.get("data"):
-            await turn_context.send_activity(genie_response["message"])
-            return
-
-        # Create Adaptive Card for summary response
-        summary_card = AdaptiveCardTemplate()
-        summary_card.add_text(question.title(), is_title=True, color="Accent")
-
-        if "query_description" in genie_response:
-            summary_card.add_text(genie_response["query_description"])
-
-        table_card = None
-        chart_card = None
-
-        if "data" in genie_response and "columns" in genie_response:
-            # Generate summary
-            try:
-                logger.debug("Generating summary from data via llm_summarizer.")
-
-                summary_result = await asyncio.to_thread(
-                    self.llm_summarizer.summarize,
-                    genie_response["columns"]["columns"],
-                    genie_response["data"]["data_array"],
-                    question,
-                    creds_kwargs.get("client_id"),
-                    creds_kwargs.get("client_secret"),
+            async def ask():
+                logger.debug(
+                    f"Sending question to Genie. Space ID: {user_selection.space_id}, Conversation ID: {user_selection.conversation_id}"
+                )
+                return await genie.ask_genie(
+                    question=question,
+                    space_id=user_selection.space_id,
+                    conversation_id=user_selection.conversation_id,
                 )
 
-                if isinstance(summary_result, dict):
-                    summary_text = summary_result.get("text", "")
-                    chart_type = summary_result.get("chart")
-                else:
-                    summary_text = str(summary_result)
-                    chart_type = None
+            logger.debug("Waiting for Genie response...")
+            response_data = await BotUtilities.keep_typing_while(turn_context, ask)
 
-                summary_card.add_text(summary_text)
+            if "error" in response_data:
+                logger.warning(f"Genie returned an error: {response_data['error']}")
+                exception_str = response_data["error"]
+                await turn_context.send_activity(f"❌ {response_data['error']}")
+                return
 
-                # Generate chart card via dedicated LLM agent when charts are enabled
-                if os.environ.get("ENABLE_CHARTS", "inactive").lower() == "active":
-                    try:
-                        logger.debug(
-                            "Requesting chart Adaptive Card from AdaptiveCardChartGenerator."
-                        )
-                        # Slice to top 15 rows for readability; LLM handles schema selection
-                        chart_data_slice = genie_response["data"]["data_array"][:15]
-                        chart_card = await asyncio.to_thread(
-                            self.chart_card_generator.generate_chart_card,
+            # Update conversation_id if changed
+            new_conversation_id = response_data.get("conversation_id")
+            if (
+                new_conversation_id
+                and new_conversation_id != user_selection.conversation_id
+            ):
+                logger.debug(
+                    f"Updating conversation ID for user {user_id} to {new_conversation_id}"
+                )
+                await self.database.update_user_selection(
+                    user_id,
+                    user_selection.space_id,
+                    user_selection.space_name,
+                    new_conversation_id,
+                )
+                user_selection.conversation_id = new_conversation_id
+
+            # Process response
+            genie_response = response_data.get("response", {})
+            logger.debug("Processing Genie response.")
+
+            # If it's just text
+            if "message" in genie_response and not genie_response.get("data"):
+                await turn_context.send_activity(genie_response["message"])
+                return
+
+            # Create Adaptive Card for summary response
+            summary_card = AdaptiveCardTemplate()
+            summary_card.add_text(question.title(), is_title=True, color="Accent")
+
+            if "query_description" in genie_response:
+                summary_card.add_text(genie_response["query_description"])
+
+            table_card = None
+            chart_card = None
+
+            if "data" in genie_response and "columns" in genie_response:
+                # Generate summary
+                try:
+                    if os.environ.get("GET_AI_INSIGHTS", "true").lower() == "true":
+                        logger.debug("Generating summary from data via llm_summarizer.")
+
+                        summary_result = await asyncio.to_thread(
+                            self.llm_summarizer.summarize,
                             genie_response["columns"]["columns"],
-                            chart_data_slice,
+                            genie_response["data"]["data_array"],
+                            question,
                             creds_kwargs.get("client_id"),
                             creds_kwargs.get("client_secret"),
                         )
-                        if chart_card:
+
+                        if isinstance(summary_result, dict):
+                            summary_text = summary_result.get("text", "")
+                            chart_type = summary_result.get("chart")
+                        else:
+                            summary_text = str(summary_result)
+                            chart_type = None
+
+                        summary_card.add_text(summary_text)
+                    else:
+                        logger.debug("AI insights are disabled via GET_AI_INSIGHTS.")
+
+                    # Generate chart card via dedicated LLM agent when charts are enabled
+                    if os.environ.get("ENABLE_CHARTS", "inactive").lower() == "active":
+                        try:
                             logger.debug(
-                                f"Chart card generated. Chart type: "
-                                f"{chart_card.get('body', [{}])[0].get('type', 'unknown')}"
+                                "Requesting chart Adaptive Card from AdaptiveCardChartGenerator."
                             )
-                    except Exception as ce:
-                        logger.error(
-                            f"Failed to generate chart card: {ce}", exc_info=True
-                        )
-                        chart_card = None
-            except Exception as e:
-                logger.error(f"Failed to generate summary: {e}", exc_info=True)
+                            # Slice to top 15 rows for readability; LLM handles schema selection
+                            chart_data_slice = genie_response["data"]["data_array"][:15]
+                            chart_card = await asyncio.to_thread(
+                                self.chart_card_generator.generate_chart_card,
+                                genie_response["columns"]["columns"],
+                                chart_data_slice,
+                                creds_kwargs.get("client_id"),
+                                creds_kwargs.get("client_secret"),
+                            )
+                            if chart_card:
+                                logger.debug(
+                                    f"Chart card generated. Chart type: "
+                                    f"{chart_card.get('body', [{}])[0].get('type', 'unknown')}"
+                                )
+                        except Exception as ce:
+                            logger.error(
+                                f"Failed to generate chart card: {ce}", exc_info=True
+                            )
+                            chart_card = None
+                except Exception as e:
+                    logger.error(f"Failed to generate summary: {e}", exc_info=True)
 
-            row_count = genie_response["data"]["row_count"]
-            logger.debug(f"Data row count: {row_count}")
+                row_count = genie_response["data"]["row_count"]
+                logger.debug(f"Data row count: {row_count}")
 
-            if row_count < 100:
-                logger.debug("Row count < 100, creating table Adaptive Card.")
-                table_card = AdaptiveCardTemplate()
-                table_card.add_query_result_table(
-                    genie_response["columns"], genie_response["data"]
+                if row_count < 100:
+                    logger.debug("Row count < 100, creating table Adaptive Card.")
+                    table_card = AdaptiveCardTemplate()
+                    table_card.add_query_result_table(
+                        genie_response["columns"], genie_response["data"]
+                    )
+                else:
+                    # For large datasets, we add a button to download the results as CSV/Excel
+                    # Generate Excel in memory to avoid disk I/O
+                    logger.debug("Row count >= 100, preparing Excel file for upload.")
+                    sending_excel = True
+
+                    # Create the dataframe
+                    logger.debug("Creating Polars DataFrame.")
+                    df = polars.DataFrame(
+                        data=genie_response["data"]["data_array"],
+                        schema=[
+                            col["name"] for col in genie_response["columns"]["columns"]
+                        ],
+                        orient="row",
+                    )
+
+                    # Write to in-memory buffer
+                    excel_buffer = BytesIO()
+                    df.write_excel(excel_buffer)
+                    excel_buffer.seek(0)
+
+                    filename = f"{uuid4()}.xlsx"
+
+            if "query" in genie_response:
+                logger.debug("Adding SQL query to table Adaptive Card.")
+                if table_card is None:
+                    table_card = AdaptiveCardTemplate()
+                table_card.add_sql_code(genie_response["query"])
+                sql_query = genie_response["query"]
+
+            logger.debug("Sending Summary Adaptive Card response to user.")
+            summary_attachment = CardFactory.adaptive_card(summary_card.get_adaptive_card())
+            await turn_context.send_activity(MessageFactory.attachment(summary_attachment))
+
+            if chart_card:
+                logger.debug("Sending Chart Adaptive Card response to user.")
+                # chart_card is a raw dict produced by AdaptiveCardChartGenerator
+                chart_attachment = CardFactory.adaptive_card(chart_card)
+                await turn_context.send_activity(
+                    MessageFactory.attachment(chart_attachment)
                 )
-            else:
-                # For large datasets, we add a button to download the results as CSV/Excel
-                # Generate Excel in memory to avoid disk I/O
-                logger.debug("Row count >= 100, preparing Excel file for upload.")
-                sending_excel = True
 
-                # Create the dataframe
-                logger.debug("Creating Polars DataFrame.")
-                df = polars.DataFrame(
-                    data=genie_response["data"]["data_array"],
-                    schema=[
-                        col["name"] for col in genie_response["columns"]["columns"]
-                    ],
-                    orient="row",
+            if table_card:
+                logger.debug("Sending Table Adaptive Card response to user.")
+                table_attachment = CardFactory.adaptive_card(table_card.get_adaptive_card())
+                await turn_context.send_activity(
+                    MessageFactory.attachment(table_attachment)
                 )
 
-                # Write to in-memory buffer
-                excel_buffer = BytesIO()
-                df.write_excel(excel_buffer)
-                excel_buffer.seek(0)
-
-                filename = f"{uuid4()}.xlsx"
-
-        if "query" in genie_response:
-            logger.debug("Adding SQL query to table Adaptive Card.")
-            if table_card is None:
-                table_card = AdaptiveCardTemplate()
-            table_card.add_sql_code(genie_response["query"])
-
-        logger.debug("Sending Summary Adaptive Card response to user.")
-        summary_attachment = CardFactory.adaptive_card(summary_card.get_adaptive_card())
-        await turn_context.send_activity(MessageFactory.attachment(summary_attachment))
-
-        if chart_card:
-            logger.debug("Sending Chart Adaptive Card response to user.")
-            # chart_card is a raw dict produced by AdaptiveCardChartGenerator
-            chart_attachment = CardFactory.adaptive_card(chart_card)
-            await turn_context.send_activity(
-                MessageFactory.attachment(chart_attachment)
-            )
-
-        if table_card:
-            logger.debug("Sending Table Adaptive Card response to user.")
-            table_attachment = CardFactory.adaptive_card(table_card.get_adaptive_card())
-            await turn_context.send_activity(
-                MessageFactory.attachment(table_attachment)
-            )
-
-        if sending_excel:
-            logger.info(f"Sending Excel file card for {filename}")
-            await self.file_card_handler.send_file_card(
-                turn_context,
-                filename=filename,
-                file_size=excel_buffer.getbuffer().nbytes,
-                file_bytes=excel_buffer,
-            )
+            if sending_excel:
+                logger.info(f"Sending Excel file card for {filename}")
+                await self.file_card_handler.send_file_card(
+                    turn_context,
+                    filename=filename,
+                    file_size=excel_buffer.getbuffer().nbytes,
+                    file_bytes=excel_buffer,
+                )
+        except Exception as e:
+            exception_str = str(e)
+            raise e
+        finally:
+            end_time = datetime.now(timezone.utc)
+            try:
+                await self.database.add_query_log(
+                    user_id=user_id,
+                    question=question,
+                    user_name=user_name,
+                    user_email=user_email,
+                    scope_name=scope_name,
+                    space_name=user_selection.space_name,
+                    space_id=user_selection.space_id,
+                    conversation_id=user_selection.conversation_id,
+                    sql_query=sql_query,
+                    start_time=start_time,
+                    end_time=end_time,
+                    exception=exception_str,
+                )
+            except Exception as db_err:
+                logger.error(f"Failed to save query log: {db_err}", exc_info=True)
 
     async def send_group_selection_card(
         self, turn_context: TurnContext, user_groups: list
@@ -469,8 +510,8 @@ class MessageHandler:
         )
 
         for index, group in enumerate(user_groups):
-            group_name = getattr(
-                group, "group_name", getattr(group, "name", f"Scope {index + 1}")
+            group_name = group.group_name or getattr(
+                group, "name", f"Scope {index + 1}"
             )
 
             card_template.add_item(

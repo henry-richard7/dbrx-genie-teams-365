@@ -1,9 +1,10 @@
 import os
-from .db_models import UserSelection, GenieSpace, SecurityGroupMapping
+from .db_models import UserSelection, GenieSpace, SecurityGroupMapping, GenieAuditLog
 from sqlmodel import select, delete, SQLModel
 from sqlalchemy.ext.asyncio import create_async_engine
 from sqlmodel.ext.asyncio.session import AsyncSession
-from typing import List
+from typing import List, Optional
+from datetime import datetime
 import logging
 
 logger = logging.getLogger(__name__)
@@ -309,3 +310,59 @@ class Database:
             else:
                 logger.warning(f"No scope details found for group ID {user_group_id}")
             return mapping
+
+    async def add_query_log(
+        self,
+        user_id: str,
+        question: str,
+        user_name: Optional[str] = None,
+        user_email: Optional[str] = None,
+        scope_name: Optional[str] = None,
+        space_name: Optional[str] = None,
+        space_id: Optional[str] = None,
+        conversation_id: Optional[str] = None,
+        sql_query: Optional[str] = None,
+        start_time: Optional[datetime] = None,
+        end_time: Optional[datetime] = None,
+        exception: Optional[str] = None,
+    ) -> GenieAuditLog:
+        """Logs a user query activity to the genie_audit_logs table.
+
+        Args:
+            user_id (str): The Microsoft Teams user ID.
+            question (str): The question asked.
+            user_name (str, optional): The name of the user.
+            user_email (str, optional): The email of the user.
+            scope_name (str, optional): The scope/security group name.
+            space_name (str, optional): The name of the Genie space.
+            space_id (str, optional): The ID of the Genie space.
+            conversation_id (str, optional): The ID of the Genie conversation.
+            sql_query (str, optional): The generated SQL query.
+            start_time (datetime, optional): The time execution started.
+            end_time (datetime, optional): The time execution ended.
+            exception (str, optional): Exception details if any error occurred.
+
+        Returns:
+            GenieAuditLog: The saved GenieAuditLog entry.
+        """
+        logger.debug(f"Adding query log for user {user_id}: '{question}'")
+        async with AsyncSession(self.engine) as session:
+            log_entry = GenieAuditLog(
+                user_id=user_id,
+                question=question,
+                user_name=user_name,
+                user_email=user_email,
+                scope_name=scope_name,
+                space_name=space_name,
+                space_id=space_id,
+                conversation_id=conversation_id,
+                sql_query=sql_query,
+                start_time=start_time,
+                end_time=end_time,
+                exception=exception,
+            )
+            session.add(log_entry)
+            await session.commit()
+            await session.refresh(log_entry)
+            logger.info(f"Successfully logged query for user {user_id}")
+            return log_entry
