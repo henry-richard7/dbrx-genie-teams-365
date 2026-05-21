@@ -3,7 +3,7 @@ import pytest_asyncio
 from datetime import datetime, timezone
 from sqlmodel import SQLModel
 from database.database import Database
-from database.db_models import UserSelection, GenieSpace, SecurityGroupMapping, QueryLog
+from database.db_models import UserSelection, GenieSpace, SecurityGroupMapping, GenieAuditLog
 
 
 @pytest_asyncio.fixture
@@ -74,9 +74,11 @@ async def test_add_query_log(memory_db: Database):
     user_id = "user123"
     question = "how many customers do we have?"
     user_name = "Alice Cooper"
+    user_email = "alice@example.com"
     scope_name = "Admin Group"
     space_name = "Customer Space"
     space_id = "space_cust_001"
+    conversation_id = "conv_12345"
     sql_query = "SELECT COUNT(*) FROM customers"
     start_time = datetime(2026, 5, 21, 12, 0, 0, tzinfo=timezone.utc)
     end_time = datetime(2026, 5, 21, 12, 0, 5, tzinfo=timezone.utc)
@@ -87,9 +89,11 @@ async def test_add_query_log(memory_db: Database):
         user_id=user_id,
         question=question,
         user_name=user_name,
+        user_email=user_email,
         scope_name=scope_name,
         space_name=space_name,
         space_id=space_id,
+        conversation_id=conversation_id,
         sql_query=sql_query,
         start_time=start_time,
         end_time=end_time,
@@ -102,9 +106,11 @@ async def test_add_query_log(memory_db: Database):
     assert log_entry.user_id == user_id
     assert log_entry.question == question
     assert log_entry.user_name == user_name
+    assert log_entry.user_email == user_email
     assert log_entry.scope_name == scope_name
     assert log_entry.space_name == space_name
     assert log_entry.space_id == space_id
+    assert log_entry.conversation_id == conversation_id
     assert log_entry.sql_query == sql_query
     # SQLModel/SQLite might return naive/tz-aware datetime depending on drivers. Let's compare naive equivalents.
     assert log_entry.start_time.replace(tzinfo=None) == start_time.replace(tzinfo=None)
@@ -115,7 +121,7 @@ async def test_add_query_log(memory_db: Database):
     from sqlmodel import select
     from sqlmodel.ext.asyncio.session import AsyncSession
     async with AsyncSession(memory_db.engine) as session:
-        statement = select(QueryLog).where(QueryLog.user_id == user_id)
+        statement = select(GenieAuditLog).where(GenieAuditLog.user_id == user_id)
         results = await session.exec(statement)
         retrieved_log = results.first()
 

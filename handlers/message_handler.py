@@ -6,6 +6,7 @@ import logging
 
 from thefuzz import fuzz
 from microsoft_agents.hosting.core import TurnContext, MessageFactory, CardFactory
+from microsoft_agents.hosting.teams import TeamsInfo
 import polars
 from uuid import uuid4
 
@@ -74,7 +75,7 @@ class MessageHandler:
             return {
                 "client_id": creds.databricks_client_id,
                 "client_secret": creds.databricks_client_secret,
-                "scope_name": getattr(creds, "group_name", creds.group_id),
+                "scope_name": creds.group_name or creds.group_id,
             }
 
         if send_prompt:
@@ -134,7 +135,7 @@ class MessageHandler:
                 turn_context.turn_state["databricks_creds"] = selected_group
                 await self.database.update_user_scope(user_id, selected_group.group_id)
                 logger.info(
-                    f"User {user_id} successfully selected group: {getattr(selected_group, 'group_name', selected_group.group_id)}"
+                    f"User {user_id} successfully selected group: {selected_group.group_name or selected_group.group_id}"
                 )
 
                 # Clear cached spaces to ensure we fetch for the new scope
@@ -147,9 +148,7 @@ class MessageHandler:
                     user_id=user_id,
                     client_id=selected_group.databricks_client_id,
                     client_secret=selected_group.databricks_client_secret,
-                    scope_name=getattr(
-                        selected_group, "group_name", selected_group.group_id
-                    ),
+                    scope_name=selected_group.group_name or selected_group.group_id,
                 )
                 await turn_context.send_activity(response)
             else:
@@ -271,6 +270,12 @@ class MessageHandler:
 
         start_time = datetime.now(timezone.utc)
         user_name = getattr(turn_context.activity.from_property, "name", None)
+        try:
+            members = await TeamsInfo.get_member(turn_context, user_id)
+            user_email = members.email
+        except Exception:
+            user_email = None
+
         scope_name = creds_kwargs.get("scope_name")
         sql_query = None
         exception_str = None
@@ -320,6 +325,7 @@ class MessageHandler:
                     user_selection.space_name,
                     new_conversation_id,
                 )
+                user_selection.conversation_id = new_conversation_id
 
             # Process response
             genie_response = response_data.get("response", {})
@@ -470,9 +476,11 @@ class MessageHandler:
                     user_id=user_id,
                     question=question,
                     user_name=user_name,
+                    user_email=user_email,
                     scope_name=scope_name,
                     space_name=user_selection.space_name,
                     space_id=user_selection.space_id,
+                    conversation_id=user_selection.conversation_id,
                     sql_query=sql_query,
                     start_time=start_time,
                     end_time=end_time,
@@ -502,8 +510,8 @@ class MessageHandler:
         )
 
         for index, group in enumerate(user_groups):
-            group_name = getattr(
-                group, "group_name", getattr(group, "name", f"Scope {index + 1}")
+            group_name = group.group_name or getattr(
+                group, "name", f"Scope {index + 1}"
             )
 
             card_template.add_item(

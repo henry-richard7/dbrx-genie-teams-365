@@ -41,17 +41,20 @@ class SecurityGroupMapping(SQLModel, table=True):
     databricks_client_secret: Optional[str] = Field(default=None, sa_column=Column(Text))
 
 
-class QueryLog(SQLModel, table=True):
+class GenieAuditLog(SQLModel, table=True):
+    __tablename__ = "genie_audit_logs"
     """Represents a log entry for a user's question and the generated response/metadata."""
 
     id: Optional[int] = Field(default=None, primary_key=True)
     
     # All other strings set to MAX size
     user_name: Optional[str] = Field(default=None, sa_column=Column(Text))
+    user_email: Optional[str] = Field(default=None, sa_column=Column(Text))
     user_id: str = Field(sa_column=Column(Text))
     scope_name: Optional[str] = Field(default=None, sa_column=Column(Text))
     space_name: Optional[str] = Field(default=None, sa_column=Column(Text))
     space_id: Optional[str] = Field(default=None, sa_column=Column(Text))
+    conversation_id: Optional[str] = Field(default=None, sa_column=Column(Text))
     question: str = Field(sa_column=Column(Text))
     sql_query: Optional[str] = Field(default=None, sa_column=Column(Text))
     start_time: Optional[datetime] = Field(default=None)
