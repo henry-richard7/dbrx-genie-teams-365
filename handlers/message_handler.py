@@ -16,6 +16,7 @@ from handlers.file_card_handler import FileCardHandler
 from database.database import Database
 from database.db_models import UserSelection
 from utils.llm_summarizer import LlmSummarizer
+from utils.chart_card_generator import AdaptiveCardChartGenerator
 
 COMMAND_LIST_SPACES = "list genie spaces"
 logger = logging.getLogger(__name__)
@@ -40,19 +41,30 @@ class MessageHandler:
         self.genie_list_handler = GenieListHandler(database)
         self.file_card_handler = FileCardHandler()
         self.llm_summarizer = LlmSummarizer()
+        self.chart_card_generator = AdaptiveCardChartGenerator()
 
-    async def _get_databricks_credentials_kwargs(self, turn_context: TurnContext, send_prompt: bool = True, force_prompt: bool = False) -> dict | None:
+    async def _get_databricks_credentials_kwargs(
+        self,
+        turn_context: TurnContext,
+        send_prompt: bool = True,
+        force_prompt: bool = False,
+    ) -> dict | None:
         """Helper to resolve Databricks credentials. Returns a dict of kwargs or None if missing."""
         has_global_token = bool(os.environ.get("DATABRICKS_TOKEN"))
-        has_global_oauth = bool(os.environ.get("DATABRICKS_CLIENT_ID") and os.environ.get("DATABRICKS_CLIENT_SECRET"))
-        
+        has_global_oauth = bool(
+            os.environ.get("DATABRICKS_CLIENT_ID")
+            and os.environ.get("DATABRICKS_CLIENT_SECRET")
+        )
+
         if has_global_token or has_global_oauth:
-            return {} # Global credentials implicitly used
+            return {}  # Global credentials implicitly used
 
         user_groups = turn_context.turn_state.get("user_groups", [])
 
         if force_prompt and len(user_groups) > 1:
-            logger.info("User is in multiple groups and force_prompt is true, prompting for scope selection.")
+            logger.info(
+                "User is in multiple groups and force_prompt is true, prompting for scope selection."
+            )
             await self.send_group_selection_card(turn_context, user_groups)
             return None
 
@@ -61,20 +73,24 @@ class MessageHandler:
             return {
                 "client_id": creds.databricks_client_id,
                 "client_secret": creds.databricks_client_secret,
-                "scope_name": getattr(creds, "group_name", creds.group_id)
+                "scope_name": getattr(creds, "group_name", creds.group_id),
             }
-        
+
         if send_prompt:
             if len(user_groups) > 1:
-                logger.info("User is in multiple groups, prompting for scope selection.")
+                logger.info(
+                    "User is in multiple groups, prompting for scope selection."
+                )
                 await self.send_group_selection_card(turn_context, user_groups)
             else:
                 logger.error("Could not determine access scope.")
-                await turn_context.send_activity("Error: Could not determine access scope. Please try `list genie spaces` again.")
+                await turn_context.send_activity(
+                    "Error: Could not determine access scope. Please try `list genie spaces` again."
+                )
         else:
             logger.error("Credentials not found.")
             await turn_context.send_activity("Error: Credentials not found.")
-        
+
         return None
 
     async def handle_card_action(
@@ -149,7 +165,9 @@ class MessageHandler:
                 user_id
             )  # Clear cached spaces for the user
 
-            creds_kwargs = await self._get_databricks_credentials_kwargs(turn_context, send_prompt=False)
+            creds_kwargs = await self._get_databricks_credentials_kwargs(
+                turn_context, send_prompt=False
+            )
             if creds_kwargs is None:
                 return
             list_spaces_kwargs = {"user_id": user_id, **creds_kwargs}
@@ -162,7 +180,9 @@ class MessageHandler:
             await turn_context.send_activity(response)
 
         elif action == "retry_spaces":
-            creds_kwargs = await self._get_databricks_credentials_kwargs(turn_context, send_prompt=False)
+            creds_kwargs = await self._get_databricks_credentials_kwargs(
+                turn_context, send_prompt=False
+            )
             if creds_kwargs is None:
                 return
             list_spaces_kwargs = {"user_id": user_id, **creds_kwargs}
@@ -242,13 +262,15 @@ class MessageHandler:
         logger.info(
             f"handle_genie_question triggered for user: {user_id}, question: '{question}'"
         )
-        creds_kwargs = await self._get_databricks_credentials_kwargs(turn_context, send_prompt=True)
+        creds_kwargs = await self._get_databricks_credentials_kwargs(
+            turn_context, send_prompt=True
+        )
         if creds_kwargs is None:
             return
-            
+
         client_id = creds_kwargs.get("client_id")
         client_secret = creds_kwargs.get("client_secret")
-        
+
         if not client_id and not client_secret:
             logger.debug("Using global Databricks credentials to initialize Genie.")
             genie = Genie()
@@ -314,28 +336,15 @@ class MessageHandler:
             try:
                 logger.debug("Generating summary from data via llm_summarizer.")
 
-                client_id = None
-                client_secret = None
-                has_global_token = bool(os.environ.get("DATABRICKS_TOKEN"))
-                has_global_oauth = bool(os.environ.get("DATABRICKS_CLIENT_ID") and os.environ.get("DATABRICKS_CLIENT_SECRET"))
-                if not (has_global_token or has_global_oauth):
-                    # user's scope dbrx_creds should be defined from earlier in handle_genie_question
-                    dbrx_creds = getattr(
-                        turn_context.turn_state, "get", lambda x, y=None: None
-                    )("databricks_creds")
-                    if dbrx_creds:
-                        client_id = dbrx_creds.databricks_client_id
-                        client_secret = dbrx_creds.databricks_client_secret
-
                 summary_result = await asyncio.to_thread(
                     self.llm_summarizer.summarize,
                     genie_response["columns"]["columns"],
                     genie_response["data"]["data_array"],
                     question,
-                    client_id,
-                    client_secret,
+                    creds_kwargs.get("client_id"),
+                    creds_kwargs.get("client_secret"),
                 )
-                
+
                 if isinstance(summary_result, dict):
                     summary_text = summary_result.get("text", "")
                     chart_type = summary_result.get("chart")
@@ -345,23 +354,30 @@ class MessageHandler:
 
                 summary_card.add_text(summary_text)
 
-                # Add chart if enabled and recommended
-                if chart_type and os.environ.get("ENABLE_CHARTS", "inactive").lower() == "active":
+                # Generate chart card via dedicated LLM agent when charts are enabled
+                if os.environ.get("ENABLE_CHARTS", "inactive").lower() == "active":
                     try:
-                        logger.debug(f"Attempting to render chart: {chart_type}")
-                        chart_card = AdaptiveCardTemplate()
-                        # Slice data to top 15 rows for charts to improve readability
-                        chart_data = {"data_array": genie_response["data"]["data_array"][:15]}
-                        if chart_type == "Chart.VerticalBar":
-                            chart_card.add_vertical_bar_chart(chart_data, genie_response["columns"])
-                        elif chart_type == "Chart.Donut":
-                            chart_card.add_donut_chart(chart_data, genie_response["columns"])
-                        elif chart_type == "Chart.VerticalBar.Grouped":
-                            chart_card.add_grouped_bar_chart(chart_data, genie_response["columns"])
-                        elif chart_type == "Chart.HorizontalBar.Stacked":
-                            chart_card.add_stacked_horizontal_bar_chart(chart_data, genie_response["columns"])
+                        logger.debug(
+                            "Requesting chart Adaptive Card from AdaptiveCardChartGenerator."
+                        )
+                        # Slice to top 15 rows for readability; LLM handles schema selection
+                        chart_data_slice = genie_response["data"]["data_array"][:15]
+                        chart_card = await asyncio.to_thread(
+                            self.chart_card_generator.generate_chart_card,
+                            genie_response["columns"]["columns"],
+                            chart_data_slice,
+                            creds_kwargs.get("client_id"),
+                            creds_kwargs.get("client_secret"),
+                        )
+                        if chart_card:
+                            logger.debug(
+                                f"Chart card generated. Chart type: "
+                                f"{chart_card.get('body', [{}])[0].get('type', 'unknown')}"
+                            )
                     except Exception as ce:
-                        logger.error(f"Failed to render chart {chart_type}: {ce}", exc_info=True)
+                        logger.error(
+                            f"Failed to generate chart card: {ce}", exc_info=True
+                        )
                         chart_card = None
             except Exception as e:
                 logger.error(f"Failed to generate summary: {e}", exc_info=True)
@@ -410,13 +426,18 @@ class MessageHandler:
 
         if chart_card:
             logger.debug("Sending Chart Adaptive Card response to user.")
-            chart_attachment = CardFactory.adaptive_card(chart_card.get_adaptive_card())
-            await turn_context.send_activity(MessageFactory.attachment(chart_attachment))
+            # chart_card is a raw dict produced by AdaptiveCardChartGenerator
+            chart_attachment = CardFactory.adaptive_card(chart_card)
+            await turn_context.send_activity(
+                MessageFactory.attachment(chart_attachment)
+            )
 
         if table_card:
             logger.debug("Sending Table Adaptive Card response to user.")
             table_attachment = CardFactory.adaptive_card(table_card.get_adaptive_card())
-            await turn_context.send_activity(MessageFactory.attachment(table_attachment))
+            await turn_context.send_activity(
+                MessageFactory.attachment(table_attachment)
+            )
 
         if sending_excel:
             logger.info(f"Sending Excel file card for {filename}")
@@ -504,12 +525,21 @@ class MessageHandler:
                     logger.debug(
                         f"Text matches '{COMMAND_LIST_SPACES}' command. Fuzzy ratio: {fuzz.partial_ratio(text, COMMAND_LIST_SPACES)}"
                     )
-                    creds_kwargs = await self._get_databricks_credentials_kwargs(turn_context, send_prompt=True, force_prompt=True)
+                    creds_kwargs = await self._get_databricks_credentials_kwargs(
+                        turn_context, send_prompt=True, force_prompt=True
+                    )
                     if creds_kwargs is None:
                         return
                     list_spaces_kwargs = {"user_id": user_id, **creds_kwargs}
 
-                    logger.debug("Calling GenieListHandler to fetching spaces.")
+                    # Always clear the cache on explicit user request so newly added
+                    # Genie spaces are visible immediately without a manual refresh.
+                    logger.debug(
+                        f"Clearing cached spaces for user {user_id} before explicit list command."
+                    )
+                    await self.database.clear_user_space_mappings(user_id)
+
+                    logger.debug("Calling GenieListHandler to fetch spaces.")
                     response = await BotUtilities.keep_typing_while(
                         turn_context,
                         self.genie_list_handler.handle_list_spaces,
@@ -528,10 +558,14 @@ class MessageHandler:
                             turn_context, user_id, text, user_selection
                         )
                     else:
-                        logger.info("User requested a question but has no scope selected.")
+                        logger.info(
+                            "User requested a question but has no scope selected."
+                        )
                         await turn_context.send_activity(
                             "Please select a Genie space first by typing 'list genie spaces'."
                         )
         except Exception as e:
             logger.error(f"Unexpected error in process_message: {e}", exc_info=True)
-            await turn_context.send_activity("❌ I'm sorry, I encountered an unexpected error while processing your request. Please try again later.")
+            await turn_context.send_activity(
+                "❌ I'm sorry, I encountered an unexpected error while processing your request. Please try again later."
+            )

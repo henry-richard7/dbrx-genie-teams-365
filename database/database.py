@@ -1,6 +1,6 @@
 import os
 from .db_models import UserSelection, GenieSpace, SecurityGroupMapping
-from sqlmodel import select, SQLModel
+from sqlmodel import select, delete, SQLModel
 from sqlalchemy.ext.asyncio import create_async_engine
 from sqlmodel.ext.asyncio.session import AsyncSession
 from typing import List
@@ -15,6 +15,7 @@ class Database:
     Provides methods to manage database tables, read/write user configuration,
     Genie space mappings, and security group resolution for multi-tenant access.
     """
+
     def __init__(self, db_url: str = None):
         """Initializes the Database instance and async engine.
 
@@ -22,7 +23,9 @@ class Database:
             db_url (str, optional): The database connection URL. If not provided, it reads from the environment variable 'DATABASE_URL', defaulting to the local SQLite DB.
         """
         if db_url is None:
-            db_url = os.environ.get("DATABASE_URL", "sqlite+aiosqlite:///teams_genie_bot.db")
+            db_url = os.environ.get(
+                "DATABASE_URL", "sqlite+aiosqlite:///teams_genie_bot.db"
+            )
         logger.debug(f"Initializing Database with URL: {db_url}")
         self.engine = create_async_engine(db_url)
 
@@ -88,6 +91,32 @@ class Database:
             )
             return mapping
 
+    async def add_user_space_mappings_bulk(
+        self, user_id: str, spaces: list[dict]
+    ) -> None:
+        """Adds multiple Genie Space mappings for a user in a single DB round-trip.
+
+        Args:
+            user_id (str): The Microsoft Teams user ID.
+            spaces (list[dict]): A list of dicts with keys 'space_id', 'space_name', 'description'.
+        """
+        logger.debug(f"Bulk-inserting {len(spaces)} space mappings for user {user_id}")
+        async with AsyncSession(self.engine) as session:
+            mappings = [
+                GenieSpace(
+                    user_id=user_id,
+                    space_id=s["space_id"],
+                    space_name=s["space_name"],
+                    description=s.get("description"),
+                )
+                for s in spaces
+            ]
+            session.add_all(mappings)
+            await session.commit()
+            logger.info(
+                f"Successfully bulk-inserted {len(mappings)} space mappings for user {user_id}"
+            )
+
     async def clear_user_space_mappings(self, user_id: str) -> int:
         """Removes all stored Genie Space mappings for a specific user.
 
@@ -99,14 +128,17 @@ class Database:
         """
         logger.debug(f"Clearing all active space mappings for user: {user_id}")
         async with AsyncSession(self.engine) as session:
-            statement = select(GenieSpace).where(GenieSpace.user_id == user_id)
-            results = await session.exec(statement)
-            mappings = results.all()
-            for mapping in mappings:
-                await session.delete(mapping)
+            # Count first so we can report how many were deleted
+            count_stmt = select(GenieSpace).where(GenieSpace.user_id == user_id)
+            count_result = await session.exec(count_stmt)
+            count = len(count_result.all())
+
+            # Single bulk DELETE — eliminates N individual round-trips
+            delete_stmt = delete(GenieSpace).where(GenieSpace.user_id == user_id)
+            await session.exec(delete_stmt)
             await session.commit()
-            logger.info(f"Cleared {len(mappings)} space mappings for user {user_id}")
-            return len(mappings)
+            logger.info(f"Cleared {count} space mappings for user {user_id}")
+            return count
 
     async def add_user_selection(
         self, user_id: str, space_id: str, space_name: str, conversation_id: str
@@ -138,7 +170,9 @@ class Database:
             logger.info(f"Successfully added user selection for {user_id}")
             return selection
 
-    async def update_user_scope(self, user_id: str, user_group_id: str) -> UserSelection | None:
+    async def update_user_scope(
+        self, user_id: str, user_group_id: str
+    ) -> UserSelection | None:
         """Updates the security group scope for a user's selection.
 
         Args:
@@ -252,7 +286,9 @@ class Database:
             logger.debug(f"Found {len(mappings)} configured security group mappings.")
             return mappings
 
-    async def get_scope_details(self, user_group_id: str) -> SecurityGroupMapping | None:
+    async def get_scope_details(
+        self, user_group_id: str
+    ) -> SecurityGroupMapping | None:
         """Retrieves Databricks credentials for a single security group ID.
 
         Args:

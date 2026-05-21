@@ -18,10 +18,17 @@ class LlmSummarizer:
     This class provides a method to convert structured data into a textual representation
     (Markdown table) and a method to generate an analytical summary and recommend charts
     using a configured ChatOpenAI model.
+
+    Model instances are cached per credential scope and automatically refreshed after
+    55 minutes so that short-lived Databricks OAuth tokens do not silently expire.
     """
+
+    # Refresh cached models after 55 min (Databricks OAuth tokens expire at 60 min)
+    _TOKEN_TTL_SECONDS = 55 * 60
 
     def __init__(self):
         self._models = {}
+        self._model_created_at = {}  # cache_key -> float (epoch seconds)
         self._workspace_clients = {}
 
     @staticmethod
@@ -39,18 +46,25 @@ class LlmSummarizer:
             return ""
 
         headers = [str(col["name"]) for col in columns]
-        
+
         # Build Markdown table
         header_row = "| " + " | ".join(headers) + " |"
         separator = "| " + " | ".join("---" for _ in headers) + " |"
-        
+
         rows = []
         for row in data:
             rows.append("| " + " | ".join(str(item) for item in row) + " |")
-            
+
         return "\n".join([header_row, separator] + rows)
 
-    def summarize(self, columns: list, data: list, question: str, client_id: str = None, client_secret: str = None) -> dict:
+    def summarize(
+        self,
+        columns: list,
+        data: list,
+        question: str,
+        client_id: str = None,
+        client_secret: str = None,
+    ) -> dict:
         """Summarizes the given dataset using a configured language model.
 
         Converts the data to a Markdown table and prompts the LLM to return a structured
@@ -67,7 +81,20 @@ class LlmSummarizer:
             dict: A dictionary containing 'text' (the summary) and 'chart' (the recommended chart type).
         """
 
+        import time
+
         cache_key = client_id or "default"
+
+        # Evict stale model so a fresh OAuth token is fetched
+        if cache_key in self._models:
+            age = time.time() - self._model_created_at.get(cache_key, 0)
+            if age >= self._TOKEN_TTL_SECONDS:
+                logger.debug(
+                    f"LlmSummarizer: model for scope '{cache_key}' "
+                    f"expired after {age:.0f}s, refreshing."
+                )
+                del self._models[cache_key]
+                del self._model_created_at[cache_key]
 
         if cache_key not in self._models:
             kwargs = {
@@ -92,18 +119,24 @@ class LlmSummarizer:
                     if cache_key not in self._workspace_clients:
                         if client_id and client_secret:
                             self._workspace_clients[cache_key] = WorkspaceClient(
-                                host=host, client_id=client_id, client_secret=client_secret
+                                host=host,
+                                client_id=client_id,
+                                client_secret=client_secret,
                             )
                         else:
-                            self._workspace_clients[cache_key] = WorkspaceClient(host=host)
-                    
+                            self._workspace_clients[cache_key] = WorkspaceClient(
+                                host=host
+                            )
+
                     w = self._workspace_clients[cache_key]
                     creds = w.config.authenticate()
                     if creds and isinstance(creds, dict) and "Authorization" in creds:
-                        kwargs["api_key"] = creds.get("Authorization").replace("Bearer ", "")
+                        kwargs["api_key"] = creds.get("Authorization").replace(
+                            "Bearer ", ""
+                        )
                     elif w.config.token:
                         kwargs["api_key"] = w.config.token
-                    
+
                     if "base_url" not in kwargs and host:
                         kwargs["base_url"] = f"{host.rstrip('/')}/serving-endpoints"
                 except Exception as e:
@@ -113,6 +146,7 @@ class LlmSummarizer:
                 kwargs["api_key"] = "not-provided"
 
             self._models[cache_key] = ChatOpenAI(**kwargs)
+            self._model_created_at[cache_key] = time.time()
 
         model = self._models[cache_key]
 
@@ -149,7 +183,7 @@ class LlmSummarizer:
             logger.warning(f"LLM API failed or rate limit reached: {e}")
             return {
                 "text": "⚠️ **AI Insights Unavailable**\n\nThe AI assistant is currently experiencing high demand or reached its rate limits. Your raw data results are provided below.",
-                "chart": None
+                "chart": None,
             }
 
         if hasattr(response, "content"):
@@ -170,7 +204,7 @@ class LlmSummarizer:
         # Parse the JSON response
         try:
             parsed_response = json.loads(response_content)
-            
+
             # Extract standard dict response
             if isinstance(parsed_response, dict) and "text" in parsed_response:
                 return parsed_response
@@ -178,11 +212,18 @@ class LlmSummarizer:
             # Handle Databricks AI Gateway legacy list format
             if isinstance(parsed_response, list):
                 for item in parsed_response:
-                    if isinstance(item, dict) and item.get("type") == "text" and "text" in item:
+                    if (
+                        isinstance(item, dict)
+                        and item.get("type") == "text"
+                        and "text" in item
+                    ):
                         # Try to parse the inner text as JSON
                         try:
                             inner_parsed = json.loads(item["text"])
-                            if isinstance(inner_parsed, dict) and "text" in inner_parsed:
+                            if (
+                                isinstance(inner_parsed, dict)
+                                and "text" in inner_parsed
+                            ):
                                 return inner_parsed
                         except json.JSONDecodeError:
                             return {"text": item["text"], "chart": None}

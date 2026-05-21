@@ -108,7 +108,7 @@ class Genie:
                 conversation_id = initial_message.conversation_id
 
             # Process query results if available
-            query_result = await self._get_query_result(space_id, initial_message, loop)
+            query_result = await self._get_query_result(space_id, initial_message)
 
             # Get message content
             message_content = await loop.run_in_executor(
@@ -120,9 +120,7 @@ class Genie:
             )
 
             # Format response based on content type
-            response_data = await self._format_response(
-                query_result, message_content, loop
-            )
+            response_data = await self._format_response(query_result, message_content)
 
             return {"response": response_data, "conversation_id": conversation_id}
 
@@ -131,14 +129,13 @@ class Genie:
             return {"error": "An error occurred while processing your request."}
 
     async def _get_query_result(
-        self, space_id: str, initial_message: Any, loop
+        self, space_id: str, initial_message: Any
     ) -> Optional[Any]:
         """Fetches the query execution results from an executed Genie message.
 
         Args:
             space_id (str): The Genie space ID.
             initial_message (Any): The initial message response object.
-            loop (asyncio.AbstractEventLoop): The running asyncio event loop.
 
         Returns:
             Optional[Any]: The query result object, or None if unavailable.
@@ -146,6 +143,7 @@ class Genie:
         if initial_message.query_result is None or not initial_message.attachments:
             return None
 
+        loop = asyncio.get_running_loop()
         try:
             return await loop.run_in_executor(
                 None,
@@ -160,22 +158,19 @@ class Genie:
             return None
 
     async def _format_response(
-        self, query_result: Any, message_content: Any, loop
+        self, query_result: Any, message_content: Any
     ) -> Dict[str, Any]:
         """Formats the Genie response into a structured dictionary.
 
         Args:
             query_result (Any): The execution query results from Databricks SQL.
             message_content (Any): The message content from the Genie API.
-            loop (asyncio.AbstractEventLoop): The running asyncio event loop.
 
         Returns:
             Dict[str, Any]: A formatted dictionary containing either SQL data or text response.
         """
         if query_result and query_result.statement_response:
-            return await self._format_query_response(
-                query_result, message_content, loop
-            )
+            return await self._format_query_response(query_result, message_content)
 
         # Handle text attachments
         if message_content.attachments:
@@ -187,18 +182,18 @@ class Genie:
         return {"message": message_content.content or "No response available"}
 
     async def _format_query_response(
-        self, query_result: Any, message_content: Any, loop
+        self, query_result: Any, message_content: Any
     ) -> Dict[str, Any]:
         """Formats a SQL query result response.
 
         Args:
             query_result (Any): The execution query results.
             message_content (Any): The message content payload.
-            loop (asyncio.AbstractEventLoop): The running asyncio event loop.
 
         Returns:
             Dict[str, Any]: A dictionary containing column schema, data array, and query context.
         """
+        loop = asyncio.get_running_loop()
         try:
             results = await loop.run_in_executor(
                 None,

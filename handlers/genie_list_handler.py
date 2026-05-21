@@ -11,6 +11,7 @@ from microsoft_agents.activity import Activity
 from modules.genie import Genie
 from modules.AdaptiveCardTemplate import AdaptiveCardTemplate
 from database.database import Database
+from database.db_models import GenieSpace
 
 
 class GenieListHandler:
@@ -62,16 +63,29 @@ class GenieListHandler:
                         "❌ No Genie spaces available at the moment."
                     )
 
-                # Store spaces in database for the user
-                for space in spaces:
-                    await self.db.add_user_space_mapping(
-                        user_id=user_id,
-                        space_id=space.space_id,
-                        space_name=space.title,
-                        description=space.description,
-                    )
+                # Bulk-insert all spaces in a single DB round-trip
+                await self.db.add_user_space_mappings_bulk(
+                    user_id=user_id,
+                    spaces=[
+                        {
+                            "space_id": s.space_id,
+                            "space_name": s.title,
+                            "description": s.description,
+                        }
+                        for s in spaces
+                    ],
+                )
 
-                existing_mappings = await self.db.get_user_space_mappings(user_id)
+                # Build card directly from the API response — no re-fetch needed
+                existing_mappings = [
+                    GenieSpace(
+                        user_id=user_id,
+                        space_id=s.space_id,
+                        space_name=s.title,
+                        description=s.description,
+                    )
+                    for s in spaces
+                ]
 
             card_template_genie_list = AdaptiveCardTemplate()
 
