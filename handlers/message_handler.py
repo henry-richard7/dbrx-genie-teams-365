@@ -417,8 +417,15 @@ class MessageHandler:
 
                     # Create the dataframe
                     logger.debug("Creating Polars DataFrame.")
+                    
+                    data_array = genie_response["data"]["data_array"]
+                    MAX_ROWS = 50000
+                    if len(data_array) > MAX_ROWS:
+                        logger.warning(f"Result set too large ({len(data_array)} rows). Truncating to {MAX_ROWS} rows.")
+                        data_array = data_array[:MAX_ROWS]
+
                     df = polars.DataFrame(
-                        data=genie_response["data"]["data_array"],
+                        data=data_array,
                         schema=[
                             col["name"] for col in genie_response["columns"]["columns"]
                         ],

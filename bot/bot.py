@@ -125,7 +125,8 @@ class TeamsGenieBot(TeamsActivityHandler):
             return
 
         # Retrieve and immediately evict the cached bytes to free memory
-        file_bytes = FileCardHandler._pending_files.pop(file_id)
+        file_data = FileCardHandler._pending_files.pop(file_id)
+        file_bytes = file_data['bytes'] if isinstance(file_data, dict) else file_data
         file_size = len(file_bytes)
         logger.debug(f"Retrieved {file_size} bytes for file '{file_name}' from cache.")
 

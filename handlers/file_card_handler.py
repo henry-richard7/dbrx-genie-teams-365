@@ -36,8 +36,20 @@ class FileCardHandler:
     """
 
     # Class-level cache shared across all FileCardHandler instances.
-    # Maps file_id (str UUID) -> raw bytes.
+    # Maps file_id (str UUID) -> dict with 'bytes' and 'timestamp'.
     _pending_files: dict = {}
+    _FILE_TTL_SECONDS = 3600  # 1 hour
+
+    @classmethod
+    def _cleanup_expired_files(cls):
+        import time
+        current_time = time.time()
+        expired_keys = [
+            k for k, v in cls._pending_files.items()
+            if isinstance(v, dict) and current_time - v.get('timestamp', 0) > cls._FILE_TTL_SECONDS
+        ]
+        for k in expired_keys:
+            del cls._pending_files[k]
 
     async def _file_upload_failed(self, turn_context: TurnContext, error: str):
         """Sends an error message to the user if a file upload fails.
@@ -106,9 +118,14 @@ class FileCardHandler:
             file_size (int): The size of the file in bytes.
             file_bytes (BytesIO): The in-memory buffer containing the file data.
         """
+        import time
         file_id = str(uuid4())
+        self._cleanup_expired_files()
         # Cache raw bytes — retrieved on accept, discarded on accept/decline
-        FileCardHandler._pending_files[file_id] = file_bytes.getvalue()
+        FileCardHandler._pending_files[file_id] = {
+            'bytes': file_bytes.getvalue(),
+            'timestamp': time.time()
+        }
 
         # Lightweight context — only a UUID reference, no encoded payload
         consent_context = {"filename": filename, "file_id": file_id}
