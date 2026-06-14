@@ -41,3 +41,4 @@ class DefaultConfig(AgentAuthConfiguration):
         self.DATABRICKS_OAUTH_CLIENT_SECRET = environ.get("DATABRICKS_OAUTH_CLIENT_SECRET")
         self.OAUTH_REDIRECT_URI = environ.get("OAUTH_REDIRECT_URI")
         self.DATABRICKS_HOST = environ.get("DATABRICKS_HOST")
+        self.USE_CONTEXT = environ.get("USE_CONTEXT", "false").lower() == "true"

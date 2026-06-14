@@ -20,9 +20,11 @@ from database.db_models import UserSelection
 from utils.llm_summarizer import LlmSummarizer
 from utils.chart_card_generator import AdaptiveCardChartGenerator
 
+from config import DefaultConfig
+
 COMMAND_LIST_SPACES = "list genie spaces"
 logger = logging.getLogger(__name__)
-
+CONFIG = DefaultConfig()
 
 class MessageHandler:
     """Processes incoming messages from Teams and routes them to the appropriate logic.
@@ -38,9 +40,11 @@ class MessageHandler:
         llm_summarizer (LlmSummarizer): The utility for generating AI summaries.
     """
 
-    def __init__(self, database: Database):
+    def __init__(self, database: Database, user_state=None, conversation_state=None):
         self.database = database
-        self.genie_list_handler = GenieListHandler(database)
+        self.user_state = user_state
+        self.conversation_state = conversation_state
+        self.genie_list_handler = GenieListHandler(database, user_state, conversation_state)
         self.file_card_handler = FileCardHandler()
         self.llm_summarizer = LlmSummarizer()
         self.chart_card_generator = AdaptiveCardChartGenerator()
@@ -64,12 +68,15 @@ class MessageHandler:
             return {}  # Global credentials implicitly used
 
         # Check for user-specific custom OAuth token
-        user_token = await self.database.get_user_token(user_id)
-        if user_token and user_token.access_token:
-            return {"token": user_token.access_token}
-
-        from config import DefaultConfig
-        CONFIG = DefaultConfig()
+        if CONFIG.USE_CONTEXT and self.user_state:
+            user_token_prop = self.user_state.create_property("UserTokenProperty")
+            token_data = await user_token_prop.get(turn_context, {})
+            if token_data and token_data.get("access_token"):
+                return {"token": token_data.get("access_token")}
+        else:
+            user_token = await self.database.get_user_token(user_id)
+            if user_token and user_token.access_token:
+                return {"token": user_token.access_token}
 
         # Try fetching token via Azure Bot Service OAuth
         if getattr(CONFIG, "CONNECTION_NAME", None):
@@ -200,11 +207,16 @@ class MessageHandler:
 
                 # Clear cached spaces to ensure we fetch for the new scope
                 logger.debug(f"Clearing cached spaces for user {user_id}")
-                await self.database.clear_user_space_mappings(user_id)
+                if CONFIG.USE_CONTEXT and self.user_state:
+                    space_mappings_prop = self.user_state.create_property("GenieSpaceMappingsProperty")
+                    await space_mappings_prop.delete(turn_context)
+                else:
+                    await self.database.clear_user_space_mappings(user_id)
 
                 response = await BotUtilities.keep_typing_while(
                     turn_context,
                     self.genie_list_handler.handle_list_spaces,
+                    turn_context=turn_context,
                     user_id=user_id,
                     client_id=selected_group.databricks_client_id,
                     client_secret=selected_group.databricks_client_secret,
@@ -221,16 +233,18 @@ class MessageHandler:
             logger.debug("Handling 'refresh_spaces' action.")
             await turn_context.delete_activity(turn_context.activity.reply_to_id)
             logger.debug(f"Clearing cached spaces for user {user_id}")
-            await self.database.clear_user_space_mappings(
-                user_id
-            )  # Clear cached spaces for the user
+            if CONFIG.USE_CONTEXT and self.user_state:
+                space_mappings_prop = self.user_state.create_property("GenieSpaceMappingsProperty")
+                await space_mappings_prop.delete(turn_context)
+            else:
+                await self.database.clear_user_space_mappings(user_id)
 
             creds_kwargs = await self._get_databricks_credentials_kwargs(
                 turn_context, send_prompt=False
             )
             if creds_kwargs is None:
                 return
-            list_spaces_kwargs = {"user_id": user_id, **creds_kwargs}
+            list_spaces_kwargs = {"turn_context": turn_context, "user_id": user_id, **creds_kwargs}
 
             response = await BotUtilities.keep_typing_while(
                 turn_context,
@@ -245,7 +259,7 @@ class MessageHandler:
             )
             if creds_kwargs is None:
                 return
-            list_spaces_kwargs = {"user_id": user_id, **creds_kwargs}
+            list_spaces_kwargs = {"turn_context": turn_context, "user_id": user_id, **creds_kwargs}
 
             response = await BotUtilities.keep_typing_while(
                 turn_context,
@@ -288,13 +302,22 @@ class MessageHandler:
         logger.info(
             f"handle_space_selection triggered for user: {user_id}, space: {space_name} ({space_id})"
         )
-        await self.database.update_user_selection(
-            user_id=user_id,
-            space_id=space_id,
-            space_name=space_name,
-            conversation_id=None,
-        )
-        logger.debug("User selection updated in database.")
+        if CONFIG.USE_CONTEXT and self.user_state:
+            user_selection_prop = self.user_state.create_property("UserSelectionProperty")
+            selection_dict = await user_selection_prop.get(turn_context, {})
+            selection_dict["user_id"] = user_id
+            selection_dict["space_id"] = space_id
+            selection_dict["space_name"] = space_name
+            selection_dict["conversation_id"] = None
+            await user_selection_prop.set(turn_context, selection_dict)
+        else:
+            await self.database.update_user_selection(
+                user_id=user_id,
+                space_id=space_id,
+                space_name=space_name,
+                conversation_id=None,
+            )
+        logger.debug("User selection updated.")
         await turn_context.delete_activity(turn_context.activity.reply_to_id)
         await turn_context.send_activity(
             f"✅ Selected space: **{space_name}**. You can now ask questions!"
@@ -380,12 +403,18 @@ class MessageHandler:
                 logger.debug(
                     f"Updating conversation ID for user {user_id} to {new_conversation_id}"
                 )
-                await self.database.update_user_selection(
-                    user_id,
-                    user_selection.space_id,
-                    user_selection.space_name,
-                    new_conversation_id,
-                )
+                if CONFIG.USE_CONTEXT and self.user_state:
+                    user_selection_prop = self.user_state.create_property("UserSelectionProperty")
+                    selection_dict = await user_selection_prop.get(turn_context, {})
+                    selection_dict["conversation_id"] = new_conversation_id
+                    await user_selection_prop.set(turn_context, selection_dict)
+                else:
+                    await self.database.update_user_selection(
+                        user_id,
+                        user_selection.space_id,
+                        user_selection.space_name,
+                        new_conversation_id,
+                    )
                 user_selection.conversation_id = new_conversation_id
 
             # Process response
@@ -639,14 +668,18 @@ class MessageHandler:
                     )
                     if creds_kwargs is None:
                         return
-                    list_spaces_kwargs = {"user_id": user_id, **creds_kwargs}
+                    list_spaces_kwargs = {"turn_context": turn_context, "user_id": user_id, **creds_kwargs}
 
                     # Always clear the cache on explicit user request so newly added
                     # Genie spaces are visible immediately without a manual refresh.
                     logger.debug(
                         f"Clearing cached spaces for user {user_id} before explicit list command."
                     )
-                    await self.database.clear_user_space_mappings(user_id)
+                    if CONFIG.USE_CONTEXT and self.user_state:
+                        space_mappings_prop = self.user_state.create_property("GenieSpaceMappingsProperty")
+                        await space_mappings_prop.delete(turn_context)
+                    else:
+                        await self.database.clear_user_space_mappings(user_id)
 
                     logger.debug("Calling GenieListHandler to fetch spaces.")
                     response = await BotUtilities.keep_typing_while(
@@ -658,7 +691,15 @@ class MessageHandler:
                 else:
                     # Check if user has a space selected
                     logger.debug("Checking if user has an active Genie space selected.")
-                    user_selection = await self.database.get_user_selection(user_id)
+                    if CONFIG.USE_CONTEXT and self.user_state:
+                        user_selection_prop = self.user_state.create_property("UserSelectionProperty")
+                        selection_dict = await user_selection_prop.get(turn_context, {})
+                        if selection_dict:
+                            user_selection = UserSelection(**selection_dict)
+                        else:
+                            user_selection = None
+                    else:
+                        user_selection = await self.database.get_user_selection(user_id)
                     if user_selection and user_selection.space_id:
                         logger.info(
                             f"User has selected scope {user_selection.space_id}. Delegating to handle_genie_question."

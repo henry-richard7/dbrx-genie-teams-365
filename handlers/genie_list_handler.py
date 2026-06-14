@@ -5,13 +5,14 @@ Genie spaces they can interact with, complete with description formatting and
 selection buttons.
 """
 
-from microsoft_agents.hosting.core import MessageFactory, CardFactory
+from microsoft_agents.hosting.core import MessageFactory, CardFactory, TurnContext
 from microsoft_agents.activity import Activity
 
 from modules.genie import Genie
 from modules.AdaptiveCardTemplate import AdaptiveCardTemplate
 from database.database import Database
 from database.db_models import GenieSpace
+from config import DefaultConfig
 
 
 class GenieListHandler:
@@ -21,16 +22,20 @@ class GenieListHandler:
         db (Database): The database interface used to fetch or cache user space mappings.
     """
 
-    def __init__(self, database: Database):
+    def __init__(self, database: Database, user_state=None, conversation_state=None):
         """Initializes the GenieListHandler.
 
         Args:
             database (Database): The instantiated Database class.
         """
         self.db = database
+        self.user_state = user_state
+        self.conversation_state = conversation_state
+        self.config = DefaultConfig()
 
     async def handle_list_spaces(
         self,
+        turn_context: TurnContext,
         user_id: str,
         client_id: str = None,
         client_secret: str = None,
@@ -54,7 +59,12 @@ class GenieListHandler:
             Activity: A Microsoft Teams message activity containing the rendered Adaptive Card.
         """
         try:
-            existing_mappings = await self.db.get_user_space_mappings(user_id)
+            if self.config.USE_CONTEXT and self.user_state:
+                space_mappings_prop = self.user_state.create_property("GenieSpaceMappingsProperty")
+                mappings_dict = await space_mappings_prop.get(turn_context, [])
+                existing_mappings = [GenieSpace(**m) for m in mappings_dict]
+            else:
+                existing_mappings = await self.db.get_user_space_mappings(user_id)
 
             if not existing_mappings:
                 genie_api = Genie(client_id=client_id, client_secret=client_secret, token=token)
@@ -65,18 +75,30 @@ class GenieListHandler:
                         "❌ No Genie spaces available at the moment."
                     )
 
-                # Bulk-insert all spaces in a single DB round-trip
-                await self.db.add_user_space_mappings_bulk(
-                    user_id=user_id,
-                    spaces=[
+                if self.config.USE_CONTEXT and self.user_state:
+                    space_mappings_prop = self.user_state.create_property("GenieSpaceMappingsProperty")
+                    await space_mappings_prop.set(turn_context, [
                         {
+                            "user_id": user_id,
                             "space_id": s.space_id,
                             "space_name": s.title,
                             "description": s.description,
                         }
                         for s in spaces
-                    ],
-                )
+                    ])
+                else:
+                    # Bulk-insert all spaces in a single DB round-trip
+                    await self.db.add_user_space_mappings_bulk(
+                        user_id=user_id,
+                        spaces=[
+                            {
+                                "space_id": s.space_id,
+                                "space_name": s.title,
+                                "description": s.description,
+                            }
+                            for s in spaces
+                        ],
+                    )
 
                 # Build card directly from the API response — no re-fetch needed
                 existing_mappings = [

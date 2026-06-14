@@ -36,14 +36,24 @@ class TeamsGenieBot(TeamsActivityHandler):
         user_group (UserGroup): The utility for determining user security groups from Entra ID.
     """
 
-    def __init__(self):
+    def __init__(self, user_state=None, conversation_state=None):
         """Initializes the TeamsGenieBot and sets up its associated handlers and utilities."""
         super().__init__()
+        self.user_state = user_state
+        self.conversation_state = conversation_state
         self.database = Database()
-        self.message_handler = MessageHandler(self.database)
+        self.message_handler = MessageHandler(self.database, self.user_state, self.conversation_state)
         self.file_card_handler = FileCardHandler()
         self.user_group = UserGroup()
         self.session = None
+
+    async def on_turn(self, turn_context: TurnContext):
+        """Overrides on_turn to save state changes at the end of every turn."""
+        await super().on_turn(turn_context)
+        if self.user_state:
+            await self.user_state.save_changes(turn_context)
+        if self.conversation_state:
+            await self.conversation_state.save_changes(turn_context)
 
     async def close(self):
         """Clean up background resources and sessions."""

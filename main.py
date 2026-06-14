@@ -20,7 +20,12 @@ from microsoft_agents.hosting.fastapi import (
     JwtAuthorizationMiddleware,
     start_agent_process,
 )
-from microsoft_agents.hosting.core import Authorization, MemoryStorage
+from microsoft_agents.hosting.core import (
+    Authorization,
+    MemoryStorage,
+    UserState,
+    ConversationState,
+)
 
 from bot.bot import TeamsGenieBot
 from config import DefaultConfig
@@ -41,11 +46,13 @@ CONFIG = DefaultConfig()
 agents_sdk_config = load_configuration_from_env(environ)
 
 STORAGE = MemoryStorage()
+USER_STATE = UserState(STORAGE)
+CONVERSATION_STATE = ConversationState(STORAGE)
 CONNECTION_MANAGER = MsalConnectionManager(**agents_sdk_config)
 ADAPTER = CloudAdapter(connection_manager=CONNECTION_MANAGER)
 AUTHORIZATION = Authorization(STORAGE, CONNECTION_MANAGER, **agents_sdk_config)
 
-AGENT = TeamsGenieBot()
+AGENT = TeamsGenieBot(user_state=USER_STATE, conversation_state=CONVERSATION_STATE)
 
 
 @asynccontextmanager
@@ -105,28 +112,47 @@ from handlers.oauth_handler import OAuthHandler
 
 OAUTH_HANDLER = OAuthHandler()
 
+
 @app.get("/api/oauth/callback", response_class=HTMLResponse)
 async def oauth_callback(code: str, state: str):
     """
     Handles the OAuth callback from Entra ID.
     """
     try:
-        user_id = state
+        if "|" in state:
+            channel_id, user_id = state.split("|", 1)
+        else:
+            channel_id, user_id = "msteams", state
+
         token_data = await OAUTH_HANDLER.exchange_code(code)
-        
+
         access_token = token_data.get("access_token")
         refresh_token = token_data.get("refresh_token")
         expires_in = token_data.get("expires_in", 3600)
-        
+
         expires_at = datetime.now(timezone.utc) + timedelta(seconds=expires_in)
-        
-        await AGENT.database.save_user_token(
-            user_id=user_id,
-            access_token=access_token,
-            refresh_token=refresh_token,
-            expires_at=expires_at
-        )
-        
+
+        if CONFIG.USE_CONTEXT:
+            # We must write directly to STORAGE since we lack a TurnContext here
+            state_key = f"{channel_id}/users/{user_id}"
+            user_state_dict = await STORAGE.read([state_key])
+            state_obj = user_state_dict.get(state_key, {})
+            # Store in the property exactly how UserState Accessor expects
+            state_obj["UserTokenProperty"] = {
+                "user_id": user_id,
+                "access_token": access_token,
+                "refresh_token": refresh_token,
+                "expires_at": expires_at.isoformat(),
+            }
+            await STORAGE.write({state_key: state_obj})
+        else:
+            await AGENT.database.save_user_token(
+                user_id=user_id,
+                access_token=access_token,
+                refresh_token=refresh_token,
+                expires_at=expires_at,
+            )
+
         return """
         <html>
             <head><title>Login Successful</title></head>
@@ -149,6 +175,7 @@ async def oauth_callback(code: str, state: str):
             </body>
         </html>
         """
+
 
 if __name__ == "__main__":
     port = int(environ.get("PORT", 3978))
