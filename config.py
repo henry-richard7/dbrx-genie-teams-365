@@ -37,3 +37,7 @@ class DefaultConfig(AgentAuthConfiguration):
             "AGENT_TYPE", "TeamsHandler"
         )  # Default to TeamsHandler
         self.PORT = 3978
+        self.DATABRICKS_OAUTH_CLIENT_ID = environ.get("DATABRICKS_OAUTH_CLIENT_ID")
+        self.DATABRICKS_OAUTH_CLIENT_SECRET = environ.get("DATABRICKS_OAUTH_CLIENT_SECRET")
+        self.OAUTH_REDIRECT_URI = environ.get("OAUTH_REDIRECT_URI")
+        self.DATABRICKS_HOST = environ.get("DATABRICKS_HOST")

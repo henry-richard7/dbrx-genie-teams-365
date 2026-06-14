@@ -34,6 +34,7 @@ class GenieListHandler:
         user_id: str,
         client_id: str = None,
         client_secret: str = None,
+        token: str = None,
         scope_name: str = None,
     ) -> Activity:
         """Handles the request to fetch and render available Genie spaces.
@@ -46,6 +47,7 @@ class GenieListHandler:
             user_id (str): The Microsoft Teams user ID.
             client_id (str, optional): The OAuth Client ID for Databricks. Defaults to None.
             client_secret (str, optional): The OAuth Client Secret for Databricks. Defaults to None.
+            token (str, optional): The User OAuth access token. Defaults to None.
             scope_name (str, optional): The name of the current scope/group (for display purposes). Defaults to None.
 
         Returns:
@@ -55,7 +57,7 @@ class GenieListHandler:
             existing_mappings = await self.db.get_user_space_mappings(user_id)
 
             if not existing_mappings:
-                genie_api = Genie(client_id=client_id, client_secret=client_secret)
+                genie_api = Genie(client_id=client_id, client_secret=client_secret, token=token)
                 spaces = await genie_api.get_spaces()
 
                 if not spaces:

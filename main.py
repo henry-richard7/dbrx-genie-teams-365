@@ -99,6 +99,57 @@ async def messages(req: Request):
     )
 
 
+from fastapi.responses import HTMLResponse
+from datetime import datetime, timezone, timedelta
+from handlers.oauth_handler import OAuthHandler
+
+OAUTH_HANDLER = OAuthHandler()
+
+@app.get("/api/oauth/callback", response_class=HTMLResponse)
+async def oauth_callback(code: str, state: str):
+    """
+    Handles the OAuth callback from Entra ID.
+    """
+    try:
+        user_id = state
+        token_data = await OAUTH_HANDLER.exchange_code(code)
+        
+        access_token = token_data.get("access_token")
+        refresh_token = token_data.get("refresh_token")
+        expires_in = token_data.get("expires_in", 3600)
+        
+        expires_at = datetime.now(timezone.utc) + timedelta(seconds=expires_in)
+        
+        await AGENT.database.save_user_token(
+            user_id=user_id,
+            access_token=access_token,
+            refresh_token=refresh_token,
+            expires_at=expires_at
+        )
+        
+        return """
+        <html>
+            <head><title>Login Successful</title></head>
+            <body style="font-family: sans-serif; text-align: center; margin-top: 50px;">
+                <h2>Login Successful!</h2>
+                <p>You have successfully authenticated with Databricks.</p>
+                <p>You can close this window and return to Microsoft Teams.</p>
+            </body>
+        </html>
+        """
+    except Exception as e:
+        logging.error(f"Error in OAuth callback: {e}", exc_info=True)
+        return f"""
+        <html>
+            <head><title>Login Failed</title></head>
+            <body style="font-family: sans-serif; text-align: center; margin-top: 50px;">
+                <h2>Login Failed</h2>
+                <p>There was an error completing your authentication: {str(e)}</p>
+                <p>Please try again.</p>
+            </body>
+        </html>
+        """
+
 if __name__ == "__main__":
     port = int(environ.get("PORT", 3978))
     uvicorn.run(app, host="0.0.0.0", port=port)

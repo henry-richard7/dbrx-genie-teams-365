@@ -1,5 +1,5 @@
 import os
-from .db_models import UserSelection, GenieSpace, SecurityGroupMapping, GenieAuditLog
+from .db_models import UserSelection, GenieSpace, SecurityGroupMapping, GenieAuditLog, UserToken
 from sqlmodel import select, delete, SQLModel
 from sqlalchemy.ext.asyncio import create_async_engine
 from sqlmodel.ext.asyncio.session import AsyncSession
@@ -366,3 +366,72 @@ class Database:
             await session.refresh(log_entry)
             logger.info(f"Successfully logged query for user {user_id}")
             return log_entry
+
+    async def get_user_token(self, user_id: str) -> UserToken | None:
+        """Retrieves the OAuth token for a user.
+
+        Args:
+            user_id (str): The Microsoft Teams user ID.
+
+        Returns:
+            UserToken | None: The user's token, or None if not found.
+        """
+        logger.debug(f"Fetching user token for: {user_id}")
+        async with AsyncSession(self.engine) as session:
+            statement = select(UserToken).where(UserToken.user_id == user_id)
+            result = await session.exec(statement)
+            return result.first()
+
+    async def save_user_token(self, user_id: str, access_token: str, refresh_token: str | None = None, expires_at: datetime | None = None) -> UserToken:
+        """Saves or updates the OAuth token for a user.
+
+        Args:
+            user_id (str): The Microsoft Teams user ID.
+            access_token (str): The OAuth access token.
+            refresh_token (str | None): The OAuth refresh token.
+            expires_at (datetime | None): Expiration time of the token.
+
+        Returns:
+            UserToken: The saved token record.
+        """
+        logger.debug(f"Saving user token for: {user_id}")
+        async with AsyncSession(self.engine) as session:
+            statement = select(UserToken).where(UserToken.user_id == user_id)
+            result = await session.exec(statement)
+            token = result.first()
+            if token:
+                token.access_token = access_token
+                token.refresh_token = refresh_token
+                token.expires_at = expires_at
+            else:
+                token = UserToken(
+                    user_id=user_id,
+                    access_token=access_token,
+                    refresh_token=refresh_token,
+                    expires_at=expires_at
+                )
+            session.add(token)
+            await session.commit()
+            await session.refresh(token)
+            return token
+
+    async def delete_user_token(self, user_id: str) -> bool:
+        """Deletes the OAuth token for a user.
+
+        Args:
+            user_id (str): The Microsoft Teams user ID.
+
+        Returns:
+            bool: True if deleted, False if not found.
+        """
+        logger.debug(f"Deleting user token for: {user_id}")
+        async with AsyncSession(self.engine) as session:
+            statement = select(UserToken).where(UserToken.user_id == user_id)
+            result = await session.exec(statement)
+            token = result.first()
+            if token:
+                await session.delete(token)
+                await session.commit()
+                return True
+            return False
+

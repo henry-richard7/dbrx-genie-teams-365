@@ -26,15 +26,16 @@ class Genie:
         genie_api (GenieAPI): The Databricks Genie API client.
     """
 
-    def __init__(self, client_id: str = None, client_secret: str = None):
+    def __init__(self, client_id: str = None, client_secret: str = None, token: str = None):
         """Initializes the Genie wrapper.
 
         Args:
             client_id (str, optional): Overrides the default OAuth client ID.
             client_secret (str, optional): Overrides the default OAuth client secret.
+            token (str, optional): User-specific OAuth access token.
         """
         self._databricks_host = environ.get("DATABRICKS_HOST")
-        self._databricks_token = environ.get("DATABRICKS_TOKEN")
+        self._databricks_token = token or environ.get("DATABRICKS_TOKEN")
         self._genie_api = None
         self._workspace_client = None
         self._client_id = client_id or environ.get("DATABRICKS_CLIENT_ID")

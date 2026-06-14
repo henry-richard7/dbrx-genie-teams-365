@@ -60,3 +60,15 @@ class GenieAuditLog(SQLModel, table=True):
     start_time: Optional[datetime] = Field(default=None)
     end_time: Optional[datetime] = Field(default=None)
     exception: Optional[str] = Field(default=None, sa_column=Column(Text))
+
+
+class UserToken(SQLModel, table=True):
+    """Represents an OAuth token for a user."""
+
+    # Primary Key
+    user_id: str = Field(default=None, primary_key=True, max_length=255)
+    
+    # All other strings set to MAX size
+    access_token: Optional[str] = Field(default=None, sa_column=Column(Text))
+    refresh_token: Optional[str] = Field(default=None, sa_column=Column(Text))
+    expires_at: Optional[datetime] = Field(default=None)

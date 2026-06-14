@@ -52,6 +52,8 @@ class MessageHandler:
         force_prompt: bool = False,
     ) -> dict | None:
         """Helper to resolve Databricks credentials. Returns a dict of kwargs or None if missing."""
+        user_id = turn_context.activity.from_property.id
+        
         has_global_token = bool(os.environ.get("DATABRICKS_TOKEN"))
         has_global_oauth = bool(
             os.environ.get("DATABRICKS_CLIENT_ID")
@@ -61,12 +63,29 @@ class MessageHandler:
         if has_global_token or has_global_oauth:
             return {}  # Global credentials implicitly used
 
-        user_groups = turn_context.turn_state.get("user_groups", [])
+        # Check for user-specific custom OAuth token
+        user_token = await self.database.get_user_token(user_id)
+        if user_token and user_token.access_token:
+            return {"token": user_token.access_token}
 
+        from config import DefaultConfig
+        CONFIG = DefaultConfig()
+
+        # Try fetching token via Azure Bot Service OAuth
+        if getattr(CONFIG, "CONNECTION_NAME", None):
+            try:
+                token_response = await turn_context.adapter.get_user_token(
+                    turn_context, CONFIG.CONNECTION_NAME, magic_code=None
+                )
+                if token_response and token_response.token:
+                    return {"token": token_response.token}
+            except Exception as e:
+                logger.debug(f"Azure Bot OAuth token not found: {e}")
+
+        # Check old Entra ID mapping fallback
+        user_groups = turn_context.turn_state.get("user_groups", [])
         if force_prompt and len(user_groups) > 1:
-            logger.info(
-                "User is in multiple groups and force_prompt is true, prompting for scope selection."
-            )
+            logger.info("User is in multiple groups and force_prompt is true, prompting for scope selection.")
             await self.send_group_selection_card(turn_context, user_groups)
             return None
 
@@ -78,17 +97,58 @@ class MessageHandler:
                 "scope_name": creds.group_name or creds.group_id,
             }
 
+        # If no credentials found, send OAuth Prompt
         if send_prompt:
-            if len(user_groups) > 1:
-                logger.info(
-                    "User is in multiple groups, prompting for scope selection."
+            from handlers.oauth_handler import OAuthHandler
+            from microsoft_agents.hosting.core import CardFactory, MessageFactory
+            from modules.AdaptiveCardTemplate import AdaptiveCardTemplate
+            from microsoft_agents.activity import OAuthCard, CardAction, ActionTypes, Attachment
+            
+            oauth_handler = OAuthHandler()
+            
+            if oauth_handler.is_configured():
+                auth_url = oauth_handler.get_auth_url(state=user_id)
+                card_template = AdaptiveCardTemplate()
+                card_template.add_text("🔐 Login to Databricks", is_title=True, color="Accent")
+                card_template.add_text("Please log in to your Databricks account to continue.")
+                card_template.add_item({
+                    "type": "ActionSet",
+                    "actions": [
+                        {
+                            "type": "Action.OpenUrl",
+                            "title": "Sign In",
+                            "url": auth_url
+                        }
+                    ]
+                })
+                attachment = CardFactory.adaptive_card(card_template.get_adaptive_card())
+                await turn_context.send_activity(MessageFactory.attachment(attachment))
+            elif getattr(CONFIG, "CONNECTION_NAME", None):
+                sign_in_link = await turn_context.adapter.get_oauth_sign_in_link(
+                    turn_context, CONFIG.CONNECTION_NAME
                 )
-                await self.send_group_selection_card(turn_context, user_groups)
+                oauth_card = OAuthCard(
+                    text="Please log in to your Databricks account to continue.",
+                    connection_name=CONFIG.CONNECTION_NAME,
+                    buttons=[
+                        CardAction(
+                            title="Sign In",
+                            type=ActionTypes.signin,
+                            value=sign_in_link
+                        )
+                    ]
+                )
+                attachment = Attachment(
+                    content_type="application/vnd.microsoft.card.oauth",
+                    content=oauth_card
+                )
+                await turn_context.send_activity(MessageFactory.attachment(attachment))
             else:
-                logger.error("Could not determine access scope.")
-                await turn_context.send_activity(
-                    "Error: Could not determine access scope. Please try `list genie spaces` again."
-                )
+                if len(user_groups) > 1:
+                    await self.send_group_selection_card(turn_context, user_groups)
+                else:
+                    logger.error("Could not determine access scope or OAuth config.")
+                    await turn_context.send_activity("Error: OAuth is not configured. Please contact administrator.")
         else:
             logger.error("Credentials not found.")
             await turn_context.send_activity("Error: Credentials not found.")
@@ -283,12 +343,13 @@ class MessageHandler:
         try:
             client_id = creds_kwargs.get("client_id")
             client_secret = creds_kwargs.get("client_secret")
+            token = creds_kwargs.get("token")
 
-            if not client_id and not client_secret:
+            if not client_id and not client_secret and not token:
                 logger.debug("Using global Databricks credentials to initialize Genie.")
                 genie = Genie()
             else:
-                genie = Genie(client_id=client_id, client_secret=client_secret)
+                genie = Genie(client_id=client_id, client_secret=client_secret, token=token)
             sending_excel = False
 
             async def ask():
