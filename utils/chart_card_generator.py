@@ -290,15 +290,28 @@ class AdaptiveCardChartGenerator:
             return None
 
         raw = response.content if hasattr(response, "content") else str(response)
+        if isinstance(raw, list):
+            text_parts = []
+            for item in raw:
+                if isinstance(item, dict) and "text" in item:
+                    text_parts.append(item["text"])
+                elif isinstance(item, str):
+                    text_parts.append(item)
+            raw = "".join(text_parts) if text_parts else str(raw)
+        elif not isinstance(raw, str):
+            raw = str(raw)
+
         raw = raw.strip()
 
-        # Strip markdown code fences if the LLM adds them despite instructions
-        if raw.startswith("```json"):
-            raw = raw[7:]
-        if raw.startswith("```"):
-            raw = raw[3:]
-        if raw.endswith("```"):
-            raw = raw[:-3]
+        import re
+        match = re.search(r'```(?:json)?\s*(\{.*?\})\s*```', raw, re.DOTALL)
+        if match:
+            raw = match.group(1)
+        else:
+            start = raw.find('{')
+            end = raw.rfind('}')
+            if start != -1 and end != -1:
+                raw = raw[start:end+1]
         raw = raw.strip()
 
         try:

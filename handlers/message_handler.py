@@ -26,6 +26,7 @@ COMMAND_LIST_SPACES = "list genie spaces"
 logger = logging.getLogger(__name__)
 CONFIG = DefaultConfig()
 
+
 class MessageHandler:
     """Processes incoming messages from Teams and routes them to the appropriate logic.
 
@@ -44,7 +45,9 @@ class MessageHandler:
         self.database = database
         self.user_state = user_state
         self.conversation_state = conversation_state
-        self.genie_list_handler = GenieListHandler(database, user_state, conversation_state)
+        self.genie_list_handler = GenieListHandler(
+            database, user_state, conversation_state
+        )
         self.file_card_handler = FileCardHandler()
         self.llm_summarizer = LlmSummarizer()
         self.chart_card_generator = AdaptiveCardChartGenerator()
@@ -57,7 +60,7 @@ class MessageHandler:
     ) -> dict | None:
         """Helper to resolve Databricks credentials. Returns a dict of kwargs or None if missing."""
         user_id = turn_context.activity.from_property.id
-        
+
         has_global_token = bool(os.environ.get("DATABRICKS_TOKEN"))
         has_global_oauth = bool(
             os.environ.get("DATABRICKS_CLIENT_ID")
@@ -72,16 +75,66 @@ class MessageHandler:
             user_token_prop = self.user_state.create_property("UserTokenProperty")
             token_data = await user_token_prop.get(turn_context, {})
             if token_data and token_data.get("access_token"):
+                from datetime import datetime, timezone, timedelta
+                expires_at_str = token_data.get("expires_at")
+                if expires_at_str:
+                    try:
+                        expires_at = datetime.fromisoformat(expires_at_str)
+                        if expires_at.tzinfo is None:
+                            expires_at = expires_at.replace(tzinfo=timezone.utc)
+                        if datetime.now(timezone.utc) >= expires_at:
+                            from handlers.oauth_handler import OAuthHandler
+                            oauth_handler = OAuthHandler()
+                            logger.info(f"Refreshing expired token for user {user_id}")
+                            new_token = await oauth_handler.refresh_token(token_data.get("refresh_token"))
+                            expires_in = new_token.get("expires_in", 3600)
+                            new_expires_at = datetime.now(timezone.utc) + timedelta(seconds=expires_in)
+                            token_data["access_token"] = new_token["access_token"]
+                            token_data["refresh_token"] = new_token.get("refresh_token", token_data.get("refresh_token"))
+                            token_data["expires_at"] = new_expires_at.isoformat()
+                            await user_token_prop.set(turn_context, token_data)
+                            return {"token": new_token["access_token"]}
+                    except Exception as e:
+                        logger.error(f"Failed to refresh token: {e}")
+                        await user_token_prop.delete(turn_context)
+                        return None
                 return {"token": token_data.get("access_token")}
         else:
             user_token = await self.database.get_user_token(user_id)
             if user_token and user_token.access_token:
+                from datetime import datetime, timezone, timedelta
+                if user_token.expires_at:
+                    expires_at = user_token.expires_at
+                    if expires_at.tzinfo is None:
+                        expires_at = expires_at.replace(tzinfo=timezone.utc)
+                    if datetime.now(timezone.utc) >= expires_at:
+                        from handlers.oauth_handler import OAuthHandler
+                        oauth_handler = OAuthHandler()
+                        try:
+                            logger.info(f"Refreshing expired token for user {user_id}")
+                            new_token = await oauth_handler.refresh_token(user_token.refresh_token)
+                            expires_in = new_token.get("expires_in", 3600)
+                            new_expires_at = datetime.now(timezone.utc) + timedelta(seconds=expires_in)
+                            await self.database.save_user_token(
+                                user_id,
+                                new_token["access_token"],
+                                new_token.get("refresh_token", user_token.refresh_token),
+                                new_expires_at
+                            )
+                            return {"token": new_token["access_token"]}
+                        except Exception as e:
+                            logger.error(f"Failed to refresh token: {e}")
+                            await self.database.delete_user_token(user_id)
+                            return None
                 return {"token": user_token.access_token}
 
         # Try fetching token via Azure Bot Service OAuth
         from handlers.oauth_handler import OAuthHandler
+
         oauth_handler = OAuthHandler()
-        if not oauth_handler.is_configured() and getattr(CONFIG, "CONNECTION_NAME", None):
+        if not oauth_handler.is_configured() and getattr(
+            CONFIG, "CONNECTION_NAME", None
+        ):
             try:
                 token_response = await turn_context.adapter.get_user_token(
                     turn_context, CONFIG.CONNECTION_NAME, magic_code=None
@@ -94,7 +147,9 @@ class MessageHandler:
         # Check old Entra ID mapping fallback
         user_groups = turn_context.turn_state.get("user_groups", [])
         if force_prompt and len(user_groups) > 1:
-            logger.info("User is in multiple groups and force_prompt is true, prompting for scope selection.")
+            logger.info(
+                "User is in multiple groups and force_prompt is true, prompting for scope selection."
+            )
             await self.send_group_selection_card(turn_context, user_groups)
             return None
 
@@ -111,26 +166,39 @@ class MessageHandler:
             from handlers.oauth_handler import OAuthHandler
             from microsoft_agents.hosting.core import CardFactory, MessageFactory
             from modules.AdaptiveCardTemplate import AdaptiveCardTemplate
-            from microsoft_agents.activity import OAuthCard, CardAction, ActionTypes, Attachment
-            
+            from microsoft_agents.activity import (
+                OAuthCard,
+                CardAction,
+                ActionTypes,
+                Attachment,
+            )
+
             oauth_handler = OAuthHandler()
-            
+
             if oauth_handler.is_configured():
                 auth_url = oauth_handler.get_auth_url(state=user_id)
                 card_template = AdaptiveCardTemplate()
-                card_template.add_text("🔐 Login to Databricks", is_title=True, color="Accent")
-                card_template.add_text("Please log in to your Databricks account to continue.")
-                card_template.add_item({
-                    "type": "ActionSet",
-                    "actions": [
-                        {
-                            "type": "Action.OpenUrl",
-                            "title": "Sign In",
-                            "url": auth_url
-                        }
-                    ]
-                })
-                attachment = CardFactory.adaptive_card(card_template.get_adaptive_card())
+                card_template.add_text(
+                    "🔐 Login to Databricks", is_title=True, color="Accent"
+                )
+                card_template.add_text(
+                    "Please log in to your Databricks account to continue."
+                )
+                card_template.add_item(
+                    {
+                        "type": "ActionSet",
+                        "actions": [
+                            {
+                                "type": "Action.OpenUrl",
+                                "title": "Sign In",
+                                "url": auth_url,
+                            }
+                        ],
+                    }
+                )
+                attachment = CardFactory.adaptive_card(
+                    card_template.get_adaptive_card()
+                )
                 await turn_context.send_activity(MessageFactory.attachment(attachment))
             elif getattr(CONFIG, "CONNECTION_NAME", None):
                 sign_in_link = await turn_context.adapter.get_oauth_sign_in_link(
@@ -141,15 +209,13 @@ class MessageHandler:
                     connection_name=CONFIG.CONNECTION_NAME,
                     buttons=[
                         CardAction(
-                            title="Sign In",
-                            type=ActionTypes.signin,
-                            value=sign_in_link
+                            title="Sign In", type=ActionTypes.signin, value=sign_in_link
                         )
-                    ]
+                    ],
                 )
                 attachment = Attachment(
                     content_type="application/vnd.microsoft.card.oauth",
-                    content=oauth_card
+                    content=oauth_card,
                 )
                 await turn_context.send_activity(MessageFactory.attachment(attachment))
             else:
@@ -157,7 +223,9 @@ class MessageHandler:
                     await self.send_group_selection_card(turn_context, user_groups)
                 else:
                     logger.error("Could not determine access scope or OAuth config.")
-                    await turn_context.send_activity("Error: OAuth is not configured. Please contact administrator.")
+                    await turn_context.send_activity(
+                        "Error: OAuth is not configured. Please contact administrator."
+                    )
         else:
             logger.error("Credentials not found.")
             await turn_context.send_activity("Error: Credentials not found.")
@@ -210,7 +278,9 @@ class MessageHandler:
                 # Clear cached spaces to ensure we fetch for the new scope
                 logger.debug(f"Clearing cached spaces for user {user_id}")
                 if CONFIG.USE_CONTEXT and self.user_state:
-                    space_mappings_prop = self.user_state.create_property("GenieSpaceMappingsProperty")
+                    space_mappings_prop = self.user_state.create_property(
+                        "GenieSpaceMappingsProperty"
+                    )
                     await space_mappings_prop.delete(turn_context)
                 else:
                     await self.database.clear_user_space_mappings(user_id)
@@ -236,7 +306,9 @@ class MessageHandler:
             await turn_context.delete_activity(turn_context.activity.reply_to_id)
             logger.debug(f"Clearing cached spaces for user {user_id}")
             if CONFIG.USE_CONTEXT and self.user_state:
-                space_mappings_prop = self.user_state.create_property("GenieSpaceMappingsProperty")
+                space_mappings_prop = self.user_state.create_property(
+                    "GenieSpaceMappingsProperty"
+                )
                 await space_mappings_prop.delete(turn_context)
             else:
                 await self.database.clear_user_space_mappings(user_id)
@@ -246,7 +318,11 @@ class MessageHandler:
             )
             if creds_kwargs is None:
                 return
-            list_spaces_kwargs = {"turn_context": turn_context, "user_id": user_id, **creds_kwargs}
+            list_spaces_kwargs = {
+                "turn_context": turn_context,
+                "user_id": user_id,
+                **creds_kwargs,
+            }
 
             response = await BotUtilities.keep_typing_while(
                 turn_context,
@@ -261,7 +337,11 @@ class MessageHandler:
             )
             if creds_kwargs is None:
                 return
-            list_spaces_kwargs = {"turn_context": turn_context, "user_id": user_id, **creds_kwargs}
+            list_spaces_kwargs = {
+                "turn_context": turn_context,
+                "user_id": user_id,
+                **creds_kwargs,
+            }
 
             response = await BotUtilities.keep_typing_while(
                 turn_context,
@@ -305,7 +385,9 @@ class MessageHandler:
             f"handle_space_selection triggered for user: {user_id}, space: {space_name} ({space_id})"
         )
         if CONFIG.USE_CONTEXT and self.user_state:
-            user_selection_prop = self.user_state.create_property("UserSelectionProperty")
+            user_selection_prop = self.user_state.create_property(
+                "UserSelectionProperty"
+            )
             selection_dict = await user_selection_prop.get(turn_context, {})
             selection_dict["user_id"] = user_id
             selection_dict["space_id"] = space_id
@@ -374,7 +456,9 @@ class MessageHandler:
                 logger.debug("Using global Databricks credentials to initialize Genie.")
                 genie = Genie()
             else:
-                genie = Genie(client_id=client_id, client_secret=client_secret, token=token)
+                genie = Genie(
+                    client_id=client_id, client_secret=client_secret, token=token
+                )
             sending_excel = False
 
             async def ask():
@@ -406,7 +490,9 @@ class MessageHandler:
                     f"Updating conversation ID for user {user_id} to {new_conversation_id}"
                 )
                 if CONFIG.USE_CONTEXT and self.user_state:
-                    user_selection_prop = self.user_state.create_property("UserSelectionProperty")
+                    user_selection_prop = self.user_state.create_property(
+                        "UserSelectionProperty"
+                    )
                     selection_dict = await user_selection_prop.get(turn_context, {})
                     selection_dict["conversation_id"] = new_conversation_id
                     await user_selection_prop.set(turn_context, selection_dict)
@@ -439,67 +525,78 @@ class MessageHandler:
             chart_card = None
 
             if "data" in genie_response and "columns" in genie_response:
-                # Generate summary
-                try:
-                    if os.environ.get("GET_AI_INSIGHTS", "true").lower() == "true":
-                        logger.debug("Generating summary from data via llm_summarizer.")
+                data_dict = genie_response.get("data", {})
+                if not isinstance(data_dict, dict):
+                    data_dict = {}
 
-                        summary_result = await asyncio.to_thread(
-                            self.llm_summarizer.summarize,
-                            genie_response["columns"]["columns"],
-                            genie_response["data"]["data_array"],
-                            question,
-                            creds_kwargs.get("client_id"),
-                            creds_kwargs.get("client_secret"),
-                        )
+                data_array = data_dict.get("data_array", [])
+                row_count = data_dict.get("row_count", 0)
+                
+                if row_count > 0 and len(data_array) > 0:
+                    # Generate summary
+                    try:
+                        if os.environ.get("GET_AI_INSIGHTS", "true").lower() == "true":
+                            logger.debug("Generating summary from data via llm_summarizer.")
 
-                        if isinstance(summary_result, dict):
-                            summary_text = summary_result.get("text", "")
-                            chart_type = summary_result.get("chart")
-                        else:
-                            summary_text = str(summary_result)
-                            chart_type = None
-
-                        summary_card.add_text(summary_text)
-                    else:
-                        logger.debug("AI insights are disabled via GET_AI_INSIGHTS.")
-
-                    # Generate chart card via dedicated LLM agent when charts are enabled
-                    if os.environ.get("ENABLE_CHARTS", "inactive").lower() == "active":
-                        try:
-                            logger.debug(
-                                "Requesting chart Adaptive Card from AdaptiveCardChartGenerator."
-                            )
-                            # Slice to top 15 rows for readability; LLM handles schema selection
-                            chart_data_slice = genie_response["data"]["data_array"][:15]
-                            chart_card = await asyncio.to_thread(
-                                self.chart_card_generator.generate_chart_card,
+                            summary_result = await asyncio.to_thread(
+                                self.llm_summarizer.summarize,
                                 genie_response["columns"]["columns"],
-                                chart_data_slice,
+                                data_array,
+                                question,
                                 creds_kwargs.get("client_id"),
                                 creds_kwargs.get("client_secret"),
                             )
-                            if chart_card:
-                                logger.debug(
-                                    f"Chart card generated. Chart type: "
-                                    f"{chart_card.get('body', [{}])[0].get('type', 'unknown')}"
-                                )
-                        except Exception as ce:
-                            logger.error(
-                                f"Failed to generate chart card: {ce}", exc_info=True
-                            )
-                            chart_card = None
-                except Exception as e:
-                    logger.error(f"Failed to generate summary: {e}", exc_info=True)
 
-                row_count = genie_response["data"]["row_count"]
+                            if isinstance(summary_result, dict):
+                                summary_text = summary_result.get("text", "")
+                                chart_type = summary_result.get("chart")
+                            else:
+                                summary_text = str(summary_result)
+                                chart_type = None
+
+                            summary_card.add_text(summary_text)
+                        else:
+                            logger.debug("AI insights are disabled via GET_AI_INSIGHTS.")
+
+                        # Generate chart card via dedicated LLM agent when charts are enabled
+                        if os.environ.get("ENABLE_CHARTS", "inactive").lower() == "active":
+                            try:
+                                logger.debug(
+                                    "Requesting chart Adaptive Card from AdaptiveCardChartGenerator."
+                                )
+                                # Slice to top 15 rows for readability; LLM handles schema selection
+                                chart_data_slice = data_array[:15]
+                                chart_card = await asyncio.to_thread(
+                                    self.chart_card_generator.generate_chart_card,
+                                    genie_response["columns"]["columns"],
+                                    chart_data_slice,
+                                    creds_kwargs.get("client_id"),
+                                    creds_kwargs.get("client_secret"),
+                                )
+                                if chart_card:
+                                    logger.debug(
+                                        f"Chart card generated. Chart type: "
+                                        f"{chart_card.get('body', [{}])[0].get('type', 'unknown')}"
+                                    )
+                            except Exception as ce:
+                                logger.error(
+                                    f"Failed to generate chart card: {ce}", exc_info=True
+                                )
+                                chart_card = None
+                    except Exception as e:
+                        logger.error(f"Failed to generate summary: {e}", exc_info=True)
+                else:
+                    logger.info("No results returned by Genie (row_count is 0 or missing).")
+                    summary_card.add_text("No results were found for your query.")
+
                 logger.debug(f"Data row count: {row_count}")
 
                 if row_count < 100:
                     logger.debug("Row count < 100, creating table Adaptive Card.")
                     table_card = AdaptiveCardTemplate()
+                    # Pass a dict that guarantees 'data_array' exists to avoid KeyError downstream
                     table_card.add_query_result_table(
-                        genie_response["columns"], genie_response["data"]
+                        genie_response["columns"], {"data_array": data_array}
                     )
                 else:
                     # For large datasets, we add a button to download the results as CSV/Excel
@@ -509,11 +606,12 @@ class MessageHandler:
 
                     # Create the dataframe
                     logger.debug("Creating Polars DataFrame.")
-                    
-                    data_array = genie_response["data"]["data_array"]
+
                     MAX_ROWS = 50000
                     if len(data_array) > MAX_ROWS:
-                        logger.warning(f"Result set too large ({len(data_array)} rows). Truncating to {MAX_ROWS} rows.")
+                        logger.warning(
+                            f"Result set too large ({len(data_array)} rows). Truncating to {MAX_ROWS} rows."
+                        )
                         data_array = data_array[:MAX_ROWS]
 
                     df = polars.DataFrame(
@@ -539,8 +637,12 @@ class MessageHandler:
                 sql_query = genie_response["query"]
 
             logger.debug("Sending Summary Adaptive Card response to user.")
-            summary_attachment = CardFactory.adaptive_card(summary_card.get_adaptive_card())
-            await turn_context.send_activity(MessageFactory.attachment(summary_attachment))
+            summary_attachment = CardFactory.adaptive_card(
+                summary_card.get_adaptive_card()
+            )
+            await turn_context.send_activity(
+                MessageFactory.attachment(summary_attachment)
+            )
 
             if chart_card:
                 logger.debug("Sending Chart Adaptive Card response to user.")
@@ -552,7 +654,9 @@ class MessageHandler:
 
             if table_card:
                 logger.debug("Sending Table Adaptive Card response to user.")
-                table_attachment = CardFactory.adaptive_card(table_card.get_adaptive_card())
+                table_attachment = CardFactory.adaptive_card(
+                    table_card.get_adaptive_card()
+                )
                 await turn_context.send_activity(
                     MessageFactory.attachment(table_attachment)
                 )
@@ -670,7 +774,11 @@ class MessageHandler:
                     )
                     if creds_kwargs is None:
                         return
-                    list_spaces_kwargs = {"turn_context": turn_context, "user_id": user_id, **creds_kwargs}
+                    list_spaces_kwargs = {
+                        "turn_context": turn_context,
+                        "user_id": user_id,
+                        **creds_kwargs,
+                    }
 
                     # Always clear the cache on explicit user request so newly added
                     # Genie spaces are visible immediately without a manual refresh.
@@ -678,7 +786,9 @@ class MessageHandler:
                         f"Clearing cached spaces for user {user_id} before explicit list command."
                     )
                     if CONFIG.USE_CONTEXT and self.user_state:
-                        space_mappings_prop = self.user_state.create_property("GenieSpaceMappingsProperty")
+                        space_mappings_prop = self.user_state.create_property(
+                            "GenieSpaceMappingsProperty"
+                        )
                         await space_mappings_prop.delete(turn_context)
                     else:
                         await self.database.clear_user_space_mappings(user_id)
@@ -694,7 +804,9 @@ class MessageHandler:
                     # Check if user has a space selected
                     logger.debug("Checking if user has an active Genie space selected.")
                     if CONFIG.USE_CONTEXT and self.user_state:
-                        user_selection_prop = self.user_state.create_property("UserSelectionProperty")
+                        user_selection_prop = self.user_state.create_property(
+                            "UserSelectionProperty"
+                        )
                         selection_dict = await user_selection_prop.get(turn_context, {})
                         if selection_dict:
                             user_selection = UserSelection(**selection_dict)

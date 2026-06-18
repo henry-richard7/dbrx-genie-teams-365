@@ -11,7 +11,7 @@ The **Databricks Genie Teams Bot** is a production-ready Microsoft Teams bot bui
 *   **Rich Visualizations & Adaptive Cards:** Generates interactive charts (bar, donut, stacked) and data tables using Microsoft Adaptive Cards.
 *   **AI Summarization:** Uses Databricks-hosted LLMs (or compatible endpoints like OpenAI) to summarize data and propose "Next Best Actions".
 *   **Excel Export:** Automatically generates downloadable Excel files for datasets exceeding 100 rows to bypass Teams API limits.
-*   **Multi-Tenant & Scoped Access Control:** Dynamically resolves user credentials using Microsoft Entra ID (Azure AD) security groups, mapping them to scoped Databricks Service Principals.
+*   **Multi-Tenant & Scoped Access Control:** Dynamically resolves user credentials using Microsoft Entra ID (Azure AD) security groups, mapping them to scoped Databricks Service Principals. Also supports Interactive User-Specific Custom OAuth (U2M) with automated background token refresh.
 *   **Scalable & Asynchronous:** Built with FastAPI, AsyncIO, and SQLModel/aiosqlite (or asyncpg for Postgres) to handle concurrent requests without blocking.
 
 ## 2. Technology Stack
@@ -57,6 +57,7 @@ The codebase is highly modularized into distinct directories based on their func
 *   **`llm_summarizer.py`**: Orchestrates LLM calls to Databricks Model Serving or OpenAI. Generates summaries, picks chart types, and handles rate limiting and fallback logic.
 *   **`chart_card_generator.py`**: Logic for analyzing dataset responses and translating them into configurations for chart rendering within Adaptive Cards.
 *   **`user_group.py`**: Handles OAuth flow with Microsoft Graph API to determine a user's Entra ID (Azure AD) group memberships for scoped Databricks access.
+*   **`oauth_handler.py`**: Manages the custom OAuth Authorization Code flow for users authenticating directly with Databricks, including automatic token refresh.
 *   **`bot_utils.py`**: Miscellaneous utility functions used throughout the bot.
 *   **`sync_lru_cache_async.py`**: Provides asynchronous caching mechanisms to avoid repetitive expensive calls.
 
@@ -71,6 +72,7 @@ The application utilizes SQLModel to track user sessions, multi-tenant mappings,
 2.  **`UserSelection`**: Acts as the active session tracker. Stores `user_id`, active `conversation_id`, the currently selected `space_id`, and `user_group_id` for scoping.
 3.  **`SecurityGroupMapping`**: Configuration table that maps Microsoft Entra ID Group Object IDs to specific Databricks Service Principal credentials (`client_id` and `client_secret`). This enforces strict data segregation based on a user's enterprise group.
 4.  **`GenieAuditLog`**: Auditing table (`genie_audit_logs`) that records user queries, generated SQL, execution times, and session contexts for monitoring and troubleshooting.
+5.  **`UserToken`**: Stores user-specific Databricks Custom OAuth credentials (`access_token`, `refresh_token`, and `expires_at`). The bot automatically uses the refresh token to renew expired access tokens seamlessly before querying Databricks.
 
 ### 4.1 User & Session Tracking Mechanics
 Because Microsoft Teams is a stateless conversational interface, the bot must reconstruct the user's state and context on every incoming message. This is achieved through a combination of Bot Framework identifiers and Database state management.
@@ -110,7 +112,14 @@ In systems where users can select their scope or workspace, there is a risk of *
 The bot mitigates this through strict server-side validation:
 * **No Trust in Client State:** The bot never trusts a user's claim to a group or space. Even if a user somehow manipulates the `UserSelection` table to inject a target `user_group_id` belonging to an executive team, the bot intercepts this.
 * **Just-In-Time Authorization:** Before executing *any* Databricks query, the bot re-verifies that the `user_group_id` requested in the `UserSelection` actually exists in the live list of groups returned by the Microsoft Graph API for that specific user's `aadObjectId`.
-* **Access Denied:** If the requested group ID is not found in the user's Graph API results, the bot throws an authorization exception and denies the query, preventing the IDOR attack. Users cannot impersonate other roles or access isolated data spaces.
+*   **Access Denied:** If the requested group ID is not found in the user's Graph API results, the bot throws an authorization exception and denies the query, preventing the IDOR attack. Users cannot impersonate other roles or access isolated data spaces.
+
+### 5.3 Interactive User-Specific Custom OAuth (U2M)
+For environments where users should authenticate directly with their own Databricks accounts rather than using a Service Principal, the bot supports a full interactive OAuth flow:
+1. **Interactive Login**: When users interact with the bot, if they are not authenticated, they receive an Adaptive Login Card with a unique Authorization URL.
+2. **Authorization Code Flow**: The user completes the login in their browser. The Databricks Account Console redirects back to the bot's `/api/oauth/callback` endpoint with an authorization code.
+3. **Token Exchange & Caching**: The bot exchanges the code for an `access_token` and `refresh_token`, caching them alongside an `expires_at` timestamp in the `UserToken` table (or in Bot Framework State memory).
+4. **Automated Refresh**: Before making any Databricks SDK calls, the `message_handler` checks the `expires_at` timestamp. If the token is expired, it uses `oauth_handler.refresh_token` to automatically renew it in the background, ensuring continuous access without requiring the user to manually log in every hour.
 
 ## 6. Architecture & Request Flow
 

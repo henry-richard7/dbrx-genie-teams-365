@@ -188,17 +188,28 @@ class LlmSummarizer:
 
         if hasattr(response, "content"):
             response_content = response.content
+            if isinstance(response_content, list):
+                text_parts = []
+                for item in response_content:
+                    if isinstance(item, dict) and "text" in item:
+                        text_parts.append(item["text"])
+                    elif isinstance(item, str):
+                        text_parts.append(item)
+                response_content = "".join(text_parts) if text_parts else str(response_content)
+            elif not isinstance(response_content, str):
+                response_content = str(response_content)
         else:
             response_content = str(response)
 
-        # Strip markdown code blocks if the LLM adds them
-        response_content = response_content.strip()
-        if response_content.startswith("```json"):
-            response_content = response_content[7:]
-        if response_content.startswith("```"):
-            response_content = response_content[3:]
-        if response_content.endswith("```"):
-            response_content = response_content[:-3]
+        import re
+        match = re.search(r'```(?:json)?\s*(\{.*?\})\s*```', response_content, re.DOTALL)
+        if match:
+            response_content = match.group(1)
+        else:
+            start = response_content.find('{')
+            end = response_content.rfind('}')
+            if start != -1 and end != -1:
+                response_content = response_content[start:end+1]
         response_content = response_content.strip()
 
         # Parse the JSON response

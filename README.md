@@ -7,10 +7,10 @@ A powerful, production-ready Microsoft Teams bot that interfaces seamlessly with
 ## 🌟 Key Features
 
 *   **🗣️ Natural Language Queries**: Ask questions about your data in plain English (e.g., *"What were our top 5 products by revenue last quarter?"*).
-*   **📊 Rich Adaptive Cards & Dynamic Charts**: Automatically visualizes query results with interactive charts (Vertical Bars, Grouped Bars, Donuts, Stacked Horizontal Bars) and structured data tables.
+*   **📊 Rich Adaptive Cards & Dynamic Charts**: Automatically visualizes query results with interactive charts (Vertical Bars, Grouped Bars, Donuts, Stacked Horizontal Bars) and structured data tables. Includes robust parsing to handle unexpected conversational text from LLMs.
 *   **🧠 AI Summarization & Insights**: Uses Databricks-hosted LLMs to automatically generate concise summaries and "Next Best Actions" based on the data. (Optional, can be toggled via config).
 *   **📂 Excel Export**: Automatically converts large datasets (>100 rows) into downloadable Excel files to bypass Teams payload limits.
-*   **🔐 Multi-Tenant Scoped Access Control**: Dynamically resolves user credentials using Microsoft Entra ID (Azure AD) security groups. Users only query Databricks using the service principals they are explicitly authorized for.
+*   **🔐 Multi-Tenant Scoped Access Control**: Dynamically resolves user credentials using Microsoft Entra ID (Azure AD) security groups. Users only query Databricks using the service principals they are explicitly authorized for. Support for user-specific Custom OAuth with automatic token refresh capabilities is also included.
 *   **🚀 Highly Scalable & Asynchronous**: Built with `FastAPI` and `aiosqlite`/`asyncio` to handle concurrent users without blocking.
 
 ---
@@ -95,15 +95,20 @@ OPENAI_API_KEY=your_api_key_here
 
 # Optional: Global Databricks Token/OAuth (If not using Entra ID scoped credentials)
 DATABRICKS_TOKEN=<Personal_Access_Token>
-DATABRICKS_CLIENT_ID=<Databricks Oauth Client ID>
-DATABRICKS_CLIENT_SECRET=<Databricks Oauth Client Secret>
+DATABRICKS_CLIENT_ID=<Databricks M2M Oauth Client ID>
+DATABRICKS_CLIENT_SECRET=<Databricks M2M Oauth Client Secret>
+
+# Optional: User-Interactive Custom OAuth 
+DATABRICKS_OAUTH_CLIENT_ID=<Your Custom OAuth App Client ID>
+DATABRICKS_OAUTH_CLIENT_SECRET=<Your Custom OAuth App Client Secret>
+OAUTH_REDIRECT_URI=<Your Bot Domain>/api/oauth/callback
 
 # Optional: Database Connection String (Defaults to a local SQLite file: teams_genie_bot.db)
 # Set this to a PostgreSQL or Azure SQL connection string for multi-pod production scaling!
 DATABASE_URL=postgresql+asyncpg://user:pass@host/dbname
 ```
 
-### 🔐 Setting up Databricks OAuth via Azure Security Groups
+### 🔐 Setting up Databricks OAuth via Azure Security Groups (M2M)
 
 This bot is designed for enterprise multi-tenant environments. Instead of using a single global Databricks Personal Access Token, it uses **Databricks OAuth for Service Principals** tied to your Azure active directory:
 
@@ -111,6 +116,14 @@ This bot is designed for enterprise multi-tenant environments. Instead of using 
 2.  **Create Databricks Service Principals**: In your Databricks workspace, create a Service Principal for each environment and generate its OAuth Client ID and Secret.
 3.  **Map in Database**: Insert records into the `SecurityGroupMapping` database table mapping the Azure AD Group Object ID to the corresponding Databricks Service Principal's OAuth credentials.
 4.  **How it Works**: When a user messages the bot, the Microsoft Graph API dynamically resolves their group memberships. The bot matches these against the `SecurityGroupMapping` table, granting them scoped Databricks access through the exact Service Principal they are authorized to use.
+
+### 🔐 Setting up Interactive User-Specific Custom OAuth (U2M)
+
+Alternatively, if you want users to explicitly authenticate with their own Databricks accounts (User-to-Machine flow), the bot supports a full interactive OAuth flow:
+
+1. **Create Custom OAuth App**: In your Databricks Account Console, create a Custom OAuth Application and register the callback URL (e.g., `https://your-bot-domain.com/api/oauth/callback`).
+2. **Configure Environment Variables**: Set `DATABRICKS_OAUTH_CLIENT_ID`, `DATABRICKS_OAUTH_CLIENT_SECRET` (if confidential), and `OAUTH_REDIRECT_URI` in your `.env`.
+3. **How it Works**: When a user messages the bot, they will be presented with an Adaptive Login Card. They authenticate directly via the Databricks login portal. The bot securely caches their `access_token` and `refresh_token` in the database, automatically renewing the tokens behind the scenes when they expire.
 
 ---
 
@@ -188,6 +201,7 @@ The bot uses SQLModel to manage four core tables that track user sessions, multi
 2.  **`UserSelection`**: Acts as the active session tracker. It stores the `user_id` along with the currently selected `space_id`, the active `conversation_id` for continuous chat threads, and the chosen `user_group_id` for scoping credentials.
 3.  **`SecurityGroupMapping`**: A configuration table mapping Microsoft Entra ID (Azure AD) security group Object IDs to specific Databricks Service Principal credentials (`databricks_client_id` and `databricks_client_secret`). This ensures strict data segregation across different enterprise groups.
 4.  **`GenieAuditLog`**: An auditing table (`genie_audit_logs`) that logs user queries, Databricks SQL responses, execution times, and session context to monitor usage and exceptions.
+5.  **`UserToken`**: Stores and auto-refreshes Databricks custom OAuth access and refresh tokens per user for interactive authentication flows.
 
 ---
 
