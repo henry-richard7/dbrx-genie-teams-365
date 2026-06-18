@@ -51,9 +51,9 @@ class TeamsGenieBot(TeamsActivityHandler):
         """Overrides on_turn to save state changes at the end of every turn."""
         await super().on_turn(turn_context)
         if self.user_state:
-            await self.user_state.save_changes(turn_context)
+            await self.user_state.save(turn_context)
         if self.conversation_state:
-            await self.conversation_state.save_changes(turn_context)
+            await self.conversation_state.save(turn_context)
 
     async def close(self):
         """Clean up background resources and sessions."""
@@ -223,11 +223,15 @@ class TeamsGenieBot(TeamsActivityHandler):
             environ.get("DATABRICKS_CLIENT_ID")
             and environ.get("DATABRICKS_CLIENT_SECRET")
         )
+        has_custom_oauth = bool(
+            environ.get("DATABRICKS_OAUTH_CLIENT_ID")
+            and environ.get("OAUTH_REDIRECT_URI")
+        )
 
-        if has_global_token or has_global_oauth:
-            # If global Databricks credentials are provided, bypass group-based access control.
+        if has_global_token or has_global_oauth or has_custom_oauth:
+            # If global Databricks credentials or Custom OAuth are provided, bypass group-based access control.
             logger.debug(
-                "Global Databricks credentials found, bypassing group access control."
+                "Global Databricks credentials or Custom OAuth found, bypassing group access control."
             )
             await self.message_handler.process_message(turn_context)
             return

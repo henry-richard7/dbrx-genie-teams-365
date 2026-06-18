@@ -15,15 +15,15 @@ class BotUtilities:
     """
 
     @staticmethod
-    async def keep_typing_while(turn_context: TurnContext, func, *args, **kwargs):
+    async def keep_typing_while(_turn_context: TurnContext, _func, *args, **kwargs):
         """Sends typing indicators while a long-running function executes.
 
         This ensures that Microsoft Teams does not timeout and the user knows the bot
         is still processing their request.
 
         Args:
-            turn_context (TurnContext): The context object for the current turn.
-            func (Callable): The asynchronous function to execute.
+            _turn_context (TurnContext): The context object for the current turn.
+            _func (Callable): The asynchronous function to execute.
             *args: Variable length argument list to pass to the function.
             **kwargs: Arbitrary keyword arguments to pass to the function.
 
@@ -34,7 +34,7 @@ class BotUtilities:
         async def keep_typing():
             try:
                 while True:
-                    await turn_context.send_activity(
+                    await _turn_context.send_activity(
                         Activity(type=ActivityTypes.typing)
                     )
                     await asyncio.sleep(10)
@@ -44,7 +44,7 @@ class BotUtilities:
         typing_task = asyncio.create_task(keep_typing())
 
         try:
-            result = await func(*args, **kwargs)
+            result = await _func(*args, **kwargs)
             return result
         finally:
             typing_task.cancel()

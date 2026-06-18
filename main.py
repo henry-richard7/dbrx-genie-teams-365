@@ -82,7 +82,20 @@ app = FastAPI(title="Authorization Agent Sample", version="1.0.0", lifespan=life
 app.state.agent_configuration = (
     CONNECTION_MANAGER.get_default_connection_configuration()
 )
-app.add_middleware(JwtAuthorizationMiddleware)
+from starlette.types import ASGIApp, Scope, Receive, Send
+
+class ExemptJwtMiddleware:
+    def __init__(self, app: ASGIApp):
+        self.app = app
+        self.jwt_middleware = JwtAuthorizationMiddleware(app)
+
+    async def __call__(self, scope: Scope, receive: Receive, send: Send):
+        if scope["type"] == "http" and scope["path"].startswith("/api/oauth"):
+            await self.app(scope, receive, send)
+            return
+        await self.jwt_middleware(scope, receive, send)
+
+app.add_middleware(ExemptJwtMiddleware)
 
 
 @app.post("/api/messages")
@@ -113,11 +126,24 @@ from handlers.oauth_handler import OAuthHandler
 OAUTH_HANDLER = OAuthHandler()
 
 
+from typing import Optional
+
 @app.get("/api/oauth/callback", response_class=HTMLResponse)
-async def oauth_callback(code: str, state: str):
+async def oauth_callback(
+    code: Optional[str] = None,
+    state: Optional[str] = None,
+    error: Optional[str] = None,
+    error_description: Optional[str] = None,
+):
     """
-    Handles the OAuth callback from Entra ID.
+    Handles the OAuth callback from Databricks.
     """
+    if error:
+        logging.error(f"OAuth returned error: {error} - {error_description}")
+        return f"<html><body><h2>Login Failed</h2><p>{error_description or error}</p></body></html>"
+
+    if not code or not state:
+        return "<html><body><h2>Error</h2><p>Missing code or state.</p></body></html>"
     try:
         if "|" in state:
             channel_id, user_id = state.split("|", 1)

@@ -79,7 +79,9 @@ class MessageHandler:
                 return {"token": user_token.access_token}
 
         # Try fetching token via Azure Bot Service OAuth
-        if getattr(CONFIG, "CONNECTION_NAME", None):
+        from handlers.oauth_handler import OAuthHandler
+        oauth_handler = OAuthHandler()
+        if not oauth_handler.is_configured() and getattr(CONFIG, "CONNECTION_NAME", None):
             try:
                 token_response = await turn_context.adapter.get_user_token(
                     turn_context, CONFIG.CONNECTION_NAME, magic_code=None
