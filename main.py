@@ -171,6 +171,48 @@ ENCRYPTOR = TokenEncryptor(CONFIG.TOKEN_ENCRYPTION_KEY)
 
 from typing import Optional
 
+from pathlib import Path
+
+def _modern_html_response(title: str, message: str, is_success: bool = False) -> str:
+    if is_success:
+        icon = "✅"
+        glow_color = "#22c55e"
+        icon_bg = "rgba(34, 197, 94, 0.15)"
+        icon_border = "rgba(34, 197, 94, 0.4)"
+        accent_color = "#22c55e"
+        action_color = "rgba(34, 197, 94, 0.85)"
+        action_text = "You can now close this window"
+    else:
+        icon = "❌"
+        glow_color = "#FF3621"
+        icon_bg = "rgba(255, 54, 33, 0.15)"
+        icon_border = "rgba(255, 54, 33, 0.4)"
+        accent_color = "#FF3621"
+        action_color = "rgba(255, 90, 70, 0.85)"
+        action_text = "Please close this window and try again"
+
+    timestamp = datetime.now(timezone.utc).strftime("%b %d, %Y · %H:%M UTC")
+
+    template_path = Path(__file__).parent / "templates" / "oauth_callback.html"
+
+    try:
+        html_template = template_path.read_text(encoding="utf-8")
+        return html_template.format(
+            title=title,
+            message=message,
+            icon=icon,
+            glow_color=glow_color,
+            icon_bg=icon_bg,
+            icon_border=icon_border,
+            accent_color=accent_color,
+            action_color=action_color,
+            action_text=action_text,
+            timestamp=timestamp,
+        )
+    except Exception as e:
+        logging.error(f"Failed to load HTML template: {e}")
+        return f"<html><body><h2>{title}</h2><p>{message}</p></body></html>"
+
 
 @app.get("/api/oauth/callback", response_class=HTMLResponse)
 async def oauth_callback(
@@ -197,10 +239,10 @@ async def oauth_callback(
     """
     if error:
         logging.error(f"OAuth returned error: {error} - {error_description}")
-        return f"<html><body><h2>Login Failed</h2><p>{error_description or error}</p></body></html>"
+        return _modern_html_response("Login Failed", error_description or error, is_success=False)
 
     if not code or not state:
-        return "<html><body><h2>Error</h2><p>Missing code or state.</p></body></html>"
+        return _modern_html_response("Error", "Missing code or state.", is_success=False)
     try:
         if "|" in state:
             channel_id, user_id = state.split("|", 1)
@@ -261,6 +303,12 @@ async def oauth_callback(
                         except Exception as e:
                             logging.warning(f"Could not delete OAuth card proactively: {e}")
                             
+                        await turn_context.send_activity("✅ Sign-in was successful!")
+                        
+                        turn_context.activity.text = "list genie spaces"
+                        turn_context.activity.value = None
+                        await AGENT.message_handler.process_message(turn_context)
+                            
                     await ADAPTER.continue_conversation(
                         CONFIG.CLIENT_ID,
                         ref.get_continuation_activity(),
@@ -272,28 +320,10 @@ async def oauth_callback(
         except Exception as e:
             logging.error(f"Error proactively deleting OAuth card: {e}")
 
-        return """
-        <html>
-            <head><title>Login Successful</title></head>
-            <body style="font-family: sans-serif; text-align: center; margin-top: 50px;">
-                <h2>Login Successful!</h2>
-                <p>You have successfully authenticated with Databricks.</p>
-                <p>You can close this window and return to Microsoft Teams.</p>
-            </body>
-        </html>
-        """
+        return _modern_html_response("Login Successful!", "You have successfully authenticated with Databricks.", is_success=True)
     except Exception as e:
         logging.error(f"Error in OAuth callback: {e}", exc_info=True)
-        return f"""
-        <html>
-            <head><title>Login Failed</title></head>
-            <body style="font-family: sans-serif; text-align: center; margin-top: 50px;">
-                <h2>Login Failed</h2>
-                <p>There was an error completing your authentication: {str(e)}</p>
-                <p>Please try again.</p>
-            </body>
-        </html>
-        """
+        return _modern_html_response("Login Failed", f"There was an error completing your authentication: {str(e)}<br>Please try again.", is_success=False)
 
 
 if __name__ == "__main__":
