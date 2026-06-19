@@ -30,6 +30,8 @@ from microsoft_agents.hosting.core import (
 from bot.bot import TeamsGenieBot
 from config import DefaultConfig
 
+from storages.s3_storage import S3Storage
+
 load_dotenv()
 
 logging.basicConfig(
@@ -45,7 +47,18 @@ CONFIG = DefaultConfig()
 
 agents_sdk_config = load_configuration_from_env(environ)
 
-STORAGE = MemoryStorage()
+if environ.get("STORAGE") == "s3":
+    STORAGE = S3Storage(
+        bucket_name=environ.get("S3_BUCKET_NAME"),
+        endpoint_url=environ.get("S3_ENDPOINT_URL"),  # None → real AWS S3
+        aws_access_key_id=environ.get("S3_ACCESS_KEY_ID"),  # None → use IAM role
+        aws_secret_access_key=environ.get("S3_SECRET_ACCESS_KEY"),
+        region_name=environ.get("S3_REGION", "us-east-1"),
+        key_prefix=environ.get("S3_KEY_PREFIX", ""),
+    )
+else:
+    STORAGE = MemoryStorage()
+
 USER_STATE = UserState(STORAGE)
 CONVERSATION_STATE = ConversationState(STORAGE)
 CONNECTION_MANAGER = MsalConnectionManager(**agents_sdk_config)
@@ -54,9 +67,11 @@ AUTHORIZATION = Authorization(STORAGE, CONNECTION_MANAGER, **agents_sdk_config)
 
 AGENT = TeamsGenieBot(user_state=USER_STATE, conversation_state=CONVERSATION_STATE)
 
+from contextlib import asynccontextmanager
+from typing import AsyncIterator
 
 @asynccontextmanager
-async def lifespan(app: FastAPI):
+async def lifespan(app: FastAPI) -> AsyncIterator[None]:
     """
     Handles startup and shutdown events for the FastAPI application.
 
@@ -67,7 +82,7 @@ async def lifespan(app: FastAPI):
         app (FastAPI): The FastAPI application instance.
 
     Yields:
-        None
+        None: Yields nothing.
     """
     # on startup
     await AGENT.database.create_tables()
@@ -84,22 +99,48 @@ app.state.agent_configuration = (
 )
 from starlette.types import ASGIApp, Scope, Receive, Send
 
+
 class ExemptJwtMiddleware:
+    """
+    Middleware to selectively bypass JWT authorization for specific routes.
+    
+    This middleware wraps `JwtAuthorizationMiddleware` but intercepts requests to 
+    the `/api/oauth` endpoints, allowing them to pass through without token validation
+    since they handle the OAuth callback flow which is unauthenticated.
+    """
+    
     def __init__(self, app: ASGIApp):
+        """
+        Initializes the middleware.
+        
+        Args:
+            app (ASGIApp): The ASGI application.
+        """
         self.app = app
         self.jwt_middleware = JwtAuthorizationMiddleware(app)
 
     async def __call__(self, scope: Scope, receive: Receive, send: Send):
+        """
+        Processes an incoming ASGI request.
+        
+        Args:
+            scope (Scope): The ASGI scope.
+            receive (Receive): The ASGI receive callable.
+            send (Send): The ASGI send callable.
+        """
         if scope["type"] == "http" and scope["path"].startswith("/api/oauth"):
             await self.app(scope, receive, send)
             return
         await self.jwt_middleware(scope, receive, send)
 
+
 app.add_middleware(ExemptJwtMiddleware)
 
 
+from starlette.responses import Response
+
 @app.post("/api/messages")
-async def messages(req: Request):
+async def messages(req: Request) -> Response:
     """
     Endpoint for handling incoming Microsoft Teams messages and activities.
 
@@ -122,11 +163,14 @@ async def messages(req: Request):
 from fastapi.responses import HTMLResponse
 from datetime import datetime, timezone, timedelta
 from handlers.oauth_handler import OAuthHandler
+from utils.encryption import TokenEncryptor
 
 OAUTH_HANDLER = OAuthHandler()
+ENCRYPTOR = TokenEncryptor(CONFIG.TOKEN_ENCRYPTION_KEY)
 
 
 from typing import Optional
+
 
 @app.get("/api/oauth/callback", response_class=HTMLResponse)
 async def oauth_callback(
@@ -134,9 +178,22 @@ async def oauth_callback(
     state: Optional[str] = None,
     error: Optional[str] = None,
     error_description: Optional[str] = None,
-):
+) -> HTMLResponse:
     """
     Handles the OAuth callback from Databricks.
+    
+    This endpoint is invoked by Databricks after a user successfully authenticates.
+    It exchanges the authorization code for an access and refresh token, encrypts them,
+    and caches them securely in either Bot Framework state or the database.
+    
+    Args:
+        code (Optional[str]): The authorization code returned by Databricks.
+        state (Optional[str]): The state parameter used for CSRF protection and context sharing.
+        error (Optional[str]): The error code if the authentication failed.
+        error_description (Optional[str]): Detailed description of the error if authentication failed.
+        
+    Returns:
+        HTMLResponse: A simple HTML page indicating whether the login succeeded or failed.
     """
     if error:
         logging.error(f"OAuth returned error: {error} - {error_description}")
@@ -158,16 +215,22 @@ async def oauth_callback(
 
         expires_at = datetime.now(timezone.utc) + timedelta(seconds=expires_in)
 
+        from microsoft_agents.hosting.core.state.agent_state import CachedAgentState
+
         if CONFIG.USE_CONTEXT:
             # We must write directly to STORAGE since we lack a TurnContext here
             state_key = f"{channel_id}/users/{user_id}"
-            user_state_dict = await STORAGE.read([state_key])
-            state_obj = user_state_dict.get(state_key, {})
+            user_state_dict = await STORAGE.read([state_key], target_cls=CachedAgentState)
+            state_obj = user_state_dict.get(state_key, CachedAgentState(state={}))
+            
+            if not state_obj.state:
+                state_obj.state = {}
+            
             # Store in the property exactly how UserState Accessor expects
-            state_obj["UserTokenProperty"] = {
+            state_obj.state["UserTokenProperty"] = {
                 "user_id": user_id,
-                "access_token": access_token,
-                "refresh_token": refresh_token,
+                "access_token": ENCRYPTOR.encrypt(access_token),
+                "refresh_token": ENCRYPTOR.encrypt(refresh_token) if refresh_token else None,
                 "expires_at": expires_at.isoformat(),
             }
             await STORAGE.write({state_key: state_obj})
@@ -178,6 +241,36 @@ async def oauth_callback(
                 refresh_token=refresh_token,
                 expires_at=expires_at,
             )
+
+        # Proactively delete the OAuth card if we saved its reference
+        try:
+            state_key = f"{channel_id}/users/{user_id}"
+            user_state_dict = await STORAGE.read([state_key], target_cls=CachedAgentState)
+            state_obj = user_state_dict.get(state_key)
+            if state_obj and state_obj.state:
+                prompt_ref = state_obj.state.get("OAuthCardReference")
+                if prompt_ref and ("activityId" in prompt_ref or "activity_id" in prompt_ref):
+                    from microsoft_agents.activity import ConversationReference
+                    from microsoft_agents.hosting.core.turn_context import TurnContext
+                    
+                    ref = ConversationReference.model_validate(prompt_ref)
+                    
+                    async def delete_card(turn_context: TurnContext):
+                        try:
+                            await turn_context.delete_activity(ref.activity_id)
+                        except Exception as e:
+                            logging.warning(f"Could not delete OAuth card proactively: {e}")
+                            
+                    await ADAPTER.continue_conversation(
+                        CONFIG.CLIENT_ID,
+                        ref.get_continuation_activity(),
+                        delete_card
+                    )
+                    
+                    del state_obj.state["OAuthCardReference"]
+                    await STORAGE.write({state_key: state_obj})
+        except Exception as e:
+            logging.error(f"Error proactively deleting OAuth card: {e}")
 
         return """
         <html>

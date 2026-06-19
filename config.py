@@ -1,3 +1,9 @@
+"""
+Configuration module for the Teams Agent.
+
+This module provides the `DefaultConfig` class which handles the loading and parsing 
+of environment variables required to run the bot.
+"""
 from os import environ
 from microsoft_agents.hosting.core import AuthTypes, AgentAuthConfiguration
 
@@ -16,6 +22,12 @@ class DefaultConfig(AgentAuthConfiguration):
         CONNECTION_NAME (str): The OAuth connection name for the bot.
         AGENT_TYPE (str): The type of agent (defaults to 'TeamsHandler').
         PORT (int): The port number for the bot's local server.
+        DATABRICKS_OAUTH_CLIENT_ID (str): The Databricks OAuth Client ID.
+        DATABRICKS_OAUTH_CLIENT_SECRET (str): The Databricks OAuth Client Secret.
+        OAUTH_REDIRECT_URI (str): The OAuth redirect URI for authentication callbacks.
+        DATABRICKS_HOST (str): The Databricks workspace host URL.
+        USE_CONTEXT (bool): Whether to use context storage for state management.
+        TOKEN_ENCRYPTION_KEY (str): The Fernet key used to encrypt OAuth tokens.
     """
 
     def __init__(self) -> None:
@@ -42,3 +54,4 @@ class DefaultConfig(AgentAuthConfiguration):
         self.OAUTH_REDIRECT_URI = environ.get("OAUTH_REDIRECT_URI")
         self.DATABRICKS_HOST = environ.get("DATABRICKS_HOST")
         self.USE_CONTEXT = environ.get("USE_CONTEXT", "false").lower() == "true"
+        self.TOKEN_ENCRYPTION_KEY = environ.get("TOKEN_ENCRYPTION_KEY")

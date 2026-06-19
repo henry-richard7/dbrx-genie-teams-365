@@ -1,3 +1,9 @@
+"""
+Database module for managing connections and operations.
+
+This module provides the Database class which wraps SQLAlchemy and SQLModel
+to interact with the SQLite or PostgreSQL database asynchronously.
+"""
 import os
 from .db_models import UserSelection, GenieSpace, SecurityGroupMapping, GenieAuditLog, UserToken
 from sqlmodel import select, delete, SQLModel
@@ -7,8 +13,12 @@ from typing import List, Optional
 from datetime import datetime
 import logging
 
-logger = logging.getLogger(__name__)
+import logging
+from utils.encryption import TokenEncryptor
+from config import DefaultConfig
 
+logger = logging.getLogger(__name__)
+CONFIG = DefaultConfig()
 
 class Database:
     """A wrapper class for SQLite database interactions using SQLModel and async SQLAlchemy.
@@ -29,6 +39,7 @@ class Database:
             )
         logger.debug(f"Initializing Database with URL: {db_url}")
         self.engine = create_async_engine(db_url)
+        self.encryptor = TokenEncryptor(CONFIG.TOKEN_ENCRYPTION_KEY)
 
     async def create_tables(self):
         """Creates all database tables defined by SQLModel if they do not exist."""
@@ -380,7 +391,12 @@ class Database:
         async with AsyncSession(self.engine) as session:
             statement = select(UserToken).where(UserToken.user_id == user_id)
             result = await session.exec(statement)
-            return result.first()
+            token = result.first()
+            if token:
+                token.access_token = self.encryptor.decrypt(token.access_token)
+                if token.refresh_token:
+                    token.refresh_token = self.encryptor.decrypt(token.refresh_token)
+            return token
 
     async def save_user_token(self, user_id: str, access_token: str, refresh_token: str | None = None, expires_at: datetime | None = None) -> UserToken:
         """Saves or updates the OAuth token for a user.
@@ -399,15 +415,19 @@ class Database:
             statement = select(UserToken).where(UserToken.user_id == user_id)
             result = await session.exec(statement)
             token = result.first()
+            
+            enc_access_token = self.encryptor.encrypt(access_token)
+            enc_refresh_token = self.encryptor.encrypt(refresh_token) if refresh_token else None
+
             if token:
-                token.access_token = access_token
-                token.refresh_token = refresh_token
+                token.access_token = enc_access_token
+                token.refresh_token = enc_refresh_token
                 token.expires_at = expires_at
             else:
                 token = UserToken(
                     user_id=user_id,
-                    access_token=access_token,
-                    refresh_token=refresh_token,
+                    access_token=enc_access_token,
+                    refresh_token=enc_refresh_token,
                     expires_at=expires_at
                 )
             session.add(token)

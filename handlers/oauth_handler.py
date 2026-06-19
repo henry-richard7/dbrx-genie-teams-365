@@ -1,3 +1,9 @@
+"""
+OAuth Authentication Handler Module.
+
+This module provides the OAuthHandler class which is responsible for managing the
+Custom OAuth (User-to-Machine) flow with Databricks.
+"""
 import os
 import aiohttp
 import urllib.parse
@@ -14,6 +20,7 @@ class OAuthHandler:
     """Handles OAuth 2.0 Authorization Code Flow for Databricks Native OAuth."""
 
     def __init__(self):
+        """Initializes the OAuthHandler using values from the global config."""
         self.databricks_host = getattr(CONFIG, "DATABRICKS_HOST", None)
         self.client_id = getattr(CONFIG, "DATABRICKS_OAUTH_CLIENT_ID", None)
         self.client_secret = getattr(CONFIG, "DATABRICKS_OAUTH_CLIENT_SECRET", None)

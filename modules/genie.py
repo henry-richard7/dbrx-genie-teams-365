@@ -1,3 +1,9 @@
+"""
+Databricks Genie API Integration Module.
+
+This module provides the Genie class, a wrapper around the Databricks SDK to 
+handle text-to-SQL generation via the Genie API.
+"""
 from typing import Dict, List, Optional, Tuple, Any
 import asyncio
 from os import environ

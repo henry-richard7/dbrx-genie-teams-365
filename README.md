@@ -11,6 +11,8 @@ A powerful, production-ready Microsoft Teams bot that interfaces seamlessly with
 *   **🧠 AI Summarization & Insights**: Uses Databricks-hosted LLMs to automatically generate concise summaries and "Next Best Actions" based on the data. (Optional, can be toggled via config).
 *   **📂 Excel Export**: Automatically converts large datasets (>100 rows) into downloadable Excel files to bypass Teams payload limits.
 *   **🔐 Multi-Tenant Scoped Access Control**: Dynamically resolves user credentials using Microsoft Entra ID (Azure AD) security groups. Users only query Databricks using the service principals they are explicitly authorized for. Support for user-specific Custom OAuth with automatic token refresh capabilities is also included.
+*   **🔒 Encrypted Credentials**: User OAuth access and refresh tokens are securely encrypted at rest.
+*   **☁️ S3 State Storage**: Optional scalable S3-compatible backend (AWS S3, MinIO, etc.) for distributed conversational state management.
 *   **🚀 Highly Scalable & Asynchronous**: Built with `FastAPI` and `aiosqlite`/`asyncio` to handle concurrent users without blocking.
 
 ---
@@ -106,6 +108,19 @@ OAUTH_REDIRECT_URI=<Your Bot Domain>/api/oauth/callback
 # Optional: Database Connection String (Defaults to a local SQLite file: teams_genie_bot.db)
 # Set this to a PostgreSQL or Azure SQL connection string for multi-pod production scaling!
 DATABASE_URL=postgresql+asyncpg://user:pass@host/dbname
+
+# Optional: S3 & State Storage Settings
+USE_CONTEXT=false
+STORAGE=s3 # Set to 's3' if USE_CONTEXT is true and you want distributed state
+S3_BUCKET_NAME=your_s3_bucket
+S3_ENDPOINT_URL=http://localhost:9000 # Omit for real AWS S3
+S3_ACCESS_KEY_ID=minioadmin
+S3_SECRET_ACCESS_KEY=minioadmin
+S3_REGION=us-east-1
+S3_KEY_PREFIX=agent-state/
+
+# Optional: Token Encryption Settings
+TOKEN_ENCRYPTION_KEY=your_generated_fernet_key_here
 ```
 
 ### 🔐 Setting up Databricks OAuth via Azure Security Groups (M2M)
@@ -184,12 +199,15 @@ The repository is highly modular and utilizes Google-style docstrings across all
 *   **`modules/`**:
     *   `genie.py`: The wrapper around the Databricks SDK (`WorkspaceClient` and `GenieAPI`).
     *   `AdaptiveCardTemplate.py`: A utility factory for dynamically generating complex JSON Adaptive Cards (Tables, Code Blocks, Charts).
+*   **`storages/`**:
+    *   `s3_storage.py`: Custom S3-compatible backend implementation for the Bot Framework's `Storage` protocol, enabling scalable state caching.
 *   **`database/`**:
     *   `database.py`: Handles async SQL connection pooling via `sqlalchemy.ext.asyncio`.
     *   `db_models.py`: Defines the `SQLModel` schemas for the bot.
 *   **`utils/`**:
     *   `llm_summarizer.py`: Orchestrates the `ChatOpenAI` calls to the Databricks Model Serving endpoint. Includes resilient fallback logic for rate limits.
     *   `user_group.py`: Handles OAuth flow with Microsoft Graph to determine Entra ID group memberships.
+    *   `encryption.py`: Provides symmetric encryption using Fernet for secure token storage.
 
 ---
 

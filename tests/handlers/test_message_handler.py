@@ -70,7 +70,7 @@ async def test_process_message_list_spaces(
 
     # Assert
     message_handler.genie_list_handler.handle_list_spaces.assert_called_once_with(
-        user_id="user_123"
+        turn_context=mock_turn_context, user_id="user_123"
     )
     mock_turn_context.send_activity.assert_any_call("list response")
 

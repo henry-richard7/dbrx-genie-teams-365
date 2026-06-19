@@ -24,7 +24,7 @@ def test_dataframe_to_text_empty():
 
 @pytest.fixture
 def mock_chat_openai():
-    with patch("utils.llm_summarizer.ChatOpenAI") as mock:
+    with patch("utils.llm_client_base.ChatOpenAI") as mock:
         yield mock
 
 

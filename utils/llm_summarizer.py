@@ -1,3 +1,9 @@
+"""
+LLM summarizer module.
+
+Provides the LlmSummarizer class which uses an LLM to generate insights
+and recommend chart types from tabular data.
+"""
 import json
 import logging
 from os import environ
@@ -11,8 +17,10 @@ llm_endpoint = environ.get(
     "OPENAI_MODEL_NAME", "databricks-qwen3-next-80b-a3b-instruct"
 )
 
+from utils.llm_client_base import BaseLLMClient
 
-class LlmSummarizer:
+
+class LlmSummarizer(BaseLLMClient):
     """Generates concise summaries from Databricks SQL datasets using a language model.
 
     This class provides a method to convert structured data into a textual representation
@@ -22,14 +30,6 @@ class LlmSummarizer:
     Model instances are cached per credential scope and automatically refreshed after
     55 minutes so that short-lived Databricks OAuth tokens do not silently expire.
     """
-
-    # Refresh cached models after 55 min (Databricks OAuth tokens expire at 60 min)
-    _TOKEN_TTL_SECONDS = 55 * 60
-
-    def __init__(self):
-        self._models = {}
-        self._model_created_at = {}  # cache_key -> float (epoch seconds)
-        self._workspace_clients = {}
 
     @staticmethod
     def dataframe_to_text(columns: list, data: list) -> str:
@@ -81,74 +81,12 @@ class LlmSummarizer:
             dict: A dictionary containing 'text' (the summary) and 'chart' (the recommended chart type).
         """
 
-        import time
-
-        cache_key = client_id or "default"
-
-        # Evict stale model so a fresh OAuth token is fetched
-        if cache_key in self._models:
-            age = time.time() - self._model_created_at.get(cache_key, 0)
-            if age >= self._TOKEN_TTL_SECONDS:
-                logger.debug(
-                    f"LlmSummarizer: model for scope '{cache_key}' "
-                    f"expired after {age:.0f}s, refreshing."
-                )
-                del self._models[cache_key]
-                del self._model_created_at[cache_key]
-
-        if cache_key not in self._models:
-            kwargs = {
-                "model": llm_endpoint,
-                "temperature": 0.1,
+        model = self._get_or_create_model(client_id, client_secret, temperature=0.1)
+        if model is None:
+            return {
+                "text": "⚠️ **AI Insights Unavailable**\n\nFailed to authenticate or initialize model.",
+                "chart": None,
             }
-
-            base_url = environ.get("OPENAI_BASE_URL")
-            if base_url:
-                kwargs["base_url"] = base_url
-
-            kwargs["api_key"] = environ.get("OPENAI_API_KEY")
-
-            if not kwargs["api_key"] or kwargs["api_key"] == "not-provided":
-                logger.debug("Attempting to get token from Databricks WorkspaceClient")
-                from databricks.sdk import WorkspaceClient
-
-                host = environ.get("DATABRICKS_HOST")
-
-                try:
-                    # Cache the WorkspaceClient to reuse authentication session
-                    if cache_key not in self._workspace_clients:
-                        if client_id and client_secret:
-                            self._workspace_clients[cache_key] = WorkspaceClient(
-                                host=host,
-                                client_id=client_id,
-                                client_secret=client_secret,
-                            )
-                        else:
-                            self._workspace_clients[cache_key] = WorkspaceClient(
-                                host=host
-                            )
-
-                    w = self._workspace_clients[cache_key]
-                    creds = w.config.authenticate()
-                    if creds and isinstance(creds, dict) and "Authorization" in creds:
-                        kwargs["api_key"] = creds.get("Authorization").replace(
-                            "Bearer ", ""
-                        )
-                    elif w.config.token:
-                        kwargs["api_key"] = w.config.token
-
-                    if "base_url" not in kwargs and host:
-                        kwargs["base_url"] = f"{host.rstrip('/')}/serving-endpoints"
-                except Exception as e:
-                    logger.error(f"Error initializing Databricks WorkspaceClient: {e}")
-
-            if not kwargs.get("api_key"):
-                kwargs["api_key"] = "not-provided"
-
-            self._models[cache_key] = ChatOpenAI(**kwargs)
-            self._model_created_at[cache_key] = time.time()
-
-        model = self._models[cache_key]
 
         # Convert data to Markdown table directly without pandas
         table_text = self.dataframe_to_text(columns, data)
@@ -186,31 +124,7 @@ class LlmSummarizer:
                 "chart": None,
             }
 
-        if hasattr(response, "content"):
-            response_content = response.content
-            if isinstance(response_content, list):
-                text_parts = []
-                for item in response_content:
-                    if isinstance(item, dict) and "text" in item:
-                        text_parts.append(item["text"])
-                    elif isinstance(item, str):
-                        text_parts.append(item)
-                response_content = "".join(text_parts) if text_parts else str(response_content)
-            elif not isinstance(response_content, str):
-                response_content = str(response_content)
-        else:
-            response_content = str(response)
-
-        import re
-        match = re.search(r'```(?:json)?\s*(\{.*?\})\s*```', response_content, re.DOTALL)
-        if match:
-            response_content = match.group(1)
-        else:
-            start = response_content.find('{')
-            end = response_content.rfind('}')
-            if start != -1 and end != -1:
-                response_content = response_content[start:end+1]
-        response_content = response_content.strip()
+        response_content = self._parse_json_response(response)
 
         # Parse the JSON response
         try:

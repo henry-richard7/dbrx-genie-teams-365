@@ -1,3 +1,10 @@
+"""
+Database models definition module.
+
+This module contains the SQLModel schemas representing the tables
+in the database, such as GenieSpace, UserSelection, SecurityGroupMapping,
+GenieAuditLog, and UserToken.
+"""
 from sqlmodel import SQLModel, Field
 from sqlalchemy import Column, Text
 from typing import Optional
@@ -42,8 +49,8 @@ class SecurityGroupMapping(SQLModel, table=True):
 
 
 class GenieAuditLog(SQLModel, table=True):
-    __tablename__ = "genie_audit_logs"
     """Represents a log entry for a user's question and the generated response/metadata."""
+    __tablename__ = "genie_audit_logs"
 
     id: Optional[int] = Field(default=None, primary_key=True)
     

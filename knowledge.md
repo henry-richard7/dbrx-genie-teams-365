@@ -49,6 +49,9 @@ The codebase is highly modularized into distinct directories based on their func
 *   **`genie.py`**: A wrapper around the Databricks SDK (`WorkspaceClient` and `GenieAPI`). Handles execution of NL queries against Databricks spaces.
 *   **`AdaptiveCardTemplate.py`**: A utility factory responsible for dynamically generating complex JSON Adaptive Cards for MS Teams, including tables, code blocks, and visual charts.
 
+### `storages/` (State Storage)
+*   **`s3_storage.py`**: Custom S3-compatible storage backend (AWS S3, MinIO) for Bot Framework's `Storage` protocol, enabling scalable distributed caching of conversational and user state.
+
 ### `database/` (Data Persistence)
 *   **`database.py`**: Manages the async SQL connection pool and session lifecycle via `sqlalchemy.ext.asyncio`.
 *   **`db_models.py`**: Defines the `SQLModel` schemas representing database tables.
@@ -58,6 +61,7 @@ The codebase is highly modularized into distinct directories based on their func
 *   **`chart_card_generator.py`**: Logic for analyzing dataset responses and translating them into configurations for chart rendering within Adaptive Cards.
 *   **`user_group.py`**: Handles OAuth flow with Microsoft Graph API to determine a user's Entra ID (Azure AD) group memberships for scoped Databricks access.
 *   **`oauth_handler.py`**: Manages the custom OAuth Authorization Code flow for users authenticating directly with Databricks, including automatic token refresh.
+*   **`encryption.py`**: Provides symmetric encryption using Fernet to securely encrypt OAuth tokens at rest.
 *   **`bot_utils.py`**: Miscellaneous utility functions used throughout the bot.
 *   **`sync_lru_cache_async.py`**: Provides asynchronous caching mechanisms to avoid repetitive expensive calls.
 
@@ -72,7 +76,7 @@ The application utilizes SQLModel to track user sessions, multi-tenant mappings,
 2.  **`UserSelection`**: Acts as the active session tracker. Stores `user_id`, active `conversation_id`, the currently selected `space_id`, and `user_group_id` for scoping.
 3.  **`SecurityGroupMapping`**: Configuration table that maps Microsoft Entra ID Group Object IDs to specific Databricks Service Principal credentials (`client_id` and `client_secret`). This enforces strict data segregation based on a user's enterprise group.
 4.  **`GenieAuditLog`**: Auditing table (`genie_audit_logs`) that records user queries, generated SQL, execution times, and session contexts for monitoring and troubleshooting.
-5.  **`UserToken`**: Stores user-specific Databricks Custom OAuth credentials (`access_token`, `refresh_token`, and `expires_at`). The bot automatically uses the refresh token to renew expired access tokens seamlessly before querying Databricks.
+5.  **`UserToken`**: Stores user-specific Databricks Custom OAuth credentials (`access_token`, `refresh_token`, and `expires_at`). These tokens are **encrypted at rest** using Fernet symmetric encryption. The bot automatically uses the refresh token to renew expired access tokens seamlessly before querying Databricks.
 
 ### 4.1 User & Session Tracking Mechanics
 Because Microsoft Teams is a stateless conversational interface, the bot must reconstruct the user's state and context on every incoming message. This is achieved through a combination of Bot Framework identifiers and Database state management.
@@ -118,7 +122,7 @@ The bot mitigates this through strict server-side validation:
 For environments where users should authenticate directly with their own Databricks accounts rather than using a Service Principal, the bot supports a full interactive OAuth flow:
 1. **Interactive Login**: When users interact with the bot, if they are not authenticated, they receive an Adaptive Login Card with a unique Authorization URL.
 2. **Authorization Code Flow**: The user completes the login in their browser. The Databricks Account Console redirects back to the bot's `/api/oauth/callback` endpoint with an authorization code.
-3. **Token Exchange & Caching**: The bot exchanges the code for an `access_token` and `refresh_token`, caching them alongside an `expires_at` timestamp in the `UserToken` table (or in Bot Framework State memory).
+3. **Token Exchange & Caching**: The bot exchanges the code for an `access_token` and `refresh_token`. These tokens are encrypted using `TokenEncryptor` and cached alongside an `expires_at` timestamp in the `UserToken` table (or in Bot Framework State memory, which can be backed by S3).
 4. **Automated Refresh**: Before making any Databricks SDK calls, the `message_handler` checks the `expires_at` timestamp. If the token is expired, it uses `oauth_handler.refresh_token` to automatically renew it in the background, ensuring continuous access without requiring the user to manually log in every hour.
 
 ## 6. Architecture & Request Flow
@@ -131,6 +135,6 @@ For environments where users should authenticate directly with their own Databri
 
 ## 6. Setup & Configuration Checklist
 - Ensure `uv` is used for package management (`uv sync`).
-- Environment variables must be configured in `.env` (Azure AD details, MS Teams Bot ID/Secret, Databricks Host, Database URL).
+- Environment variables must be configured in `.env` (Azure AD details, MS Teams Bot ID/Secret, Databricks Host, Database URL, Token Encryption Key, and S3 Storage vars if using distributed state).
 - Requires Microsoft Graph API permissions: `GroupMember.Read.All`, `User.Read.All`.
-- Can run locally using SQLite or scale via PostgreSQL. Start the bot with `uv run python main.py`.
+- Can run locally using SQLite/MemoryStorage or scale via PostgreSQL and S3Storage. Start the bot with `uv run python main.py`.

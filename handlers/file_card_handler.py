@@ -42,6 +42,11 @@ class FileCardHandler:
 
     @classmethod
     def _cleanup_expired_files(cls):
+        """Cleans up expired file data from the class-level cache.
+
+        Iterates through `_pending_files` and removes any entries that have
+        exceeded `_FILE_TTL_SECONDS`.
+        """
         import time
         current_time = time.time()
         expired_keys = [

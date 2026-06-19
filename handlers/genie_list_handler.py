@@ -211,50 +211,9 @@ class GenieListHandler:
             return reply
 
         except Exception as e:
-
-            # Fallback error card with new format
-            error_card_template = AdaptiveCardTemplate()
-
-            error_card_template.add_text(
-                content="❌ Failed to retrieve available spaces",
-                color="Attention",
-                is_title=True,
+            from utils.bot_utils import BotUtilities
+            return BotUtilities.create_error_activity(
+                title="❌ Failed to retrieve available spaces",
+                message=f"I encountered an issue while fetching the Genie spaces. This could be due to:\n\n{str(e)}",
+                retry_action={"title": "🔄 Try Again", "action": "retry_spaces"}
             )
-            error_card_template.add_text(
-                content="❌ Failed to retrieve available spaces", color="Attention"
-            )
-            error_card_template.add_text(
-                content="I encountered an issue while fetching the Genie spaces. This could be due to:",
-                spacing="Medium",
-            )
-            error_card_template.add_text(
-                content=f"{str(e)}",
-                spacing="Medium",
-            )
-
-            error_card_template.add_item(
-                {
-                    "type": "Container",
-                    "items": [
-                        {
-                            "type": "ActionSet",
-                            "actions": [
-                                {
-                                    "type": "Action.Submit",
-                                    "title": "🔄 Try Again",
-                                    "style": "positive",
-                                    "iconUrl": "icon:Refresh",
-                                    "data": {"action": "retry_spaces"},
-                                }
-                            ],
-                            "horizontalAlignment": "Left",
-                        }
-                    ],
-                    "spacing": "Medium",
-                },
-            )
-
-            error_attachment = CardFactory.adaptive_card(
-                error_card_template.get_adaptive_card()
-            )
-            return MessageFactory.attachment(error_attachment)
