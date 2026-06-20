@@ -310,7 +310,9 @@ The repository is highly modular and utilizes Google-style docstrings across all
     *   `genie.py`: The wrapper around the Databricks SDK (`WorkspaceClient` and `GenieAPI`).
     *   `AdaptiveCardTemplate.py`: A utility factory for dynamically generating complex JSON Adaptive Cards (Tables, Code Blocks, Charts).
 *   **`storages/`**:
-    *   `s3_storage.py`: Custom S3-compatible backend implementation for the Bot Framework's `Storage` protocol, enabling scalable state caching.
+    *   **`s3_storage.py`**: Custom S3-compatible backend implementation for the Bot Framework's `Storage` protocol, enabling scalable state caching.
+    *   **Azure Cosmos DB**: Natively supported via `microsoft-agents-storage-cosmos`.
+    *   **Azure Blob Storage**: Natively supported via `microsoft-agents-storage-blob`.
 *   **`database/`**:
     *   `database.py`: Handles async SQL connection pooling via `sqlalchemy.ext.asyncio`.
     *   `db_models.py`: Defines the `SQLModel` schemas for the bot.

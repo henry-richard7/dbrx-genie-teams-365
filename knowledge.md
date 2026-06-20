@@ -105,9 +105,9 @@ In an enterprise environment, it is critical to maintain a history of what data 
 
 ### 4.3 Distributed File Caching (Excel Exports)
 To bypass Microsoft Teams Adaptive Card size limits and ensure performance, large Databricks SQL responses (>100 rows) are converted into downloadable `.xlsx` Excel files. This requires a secure, two-step file consent flow with the user.
-*   **Storage Injection:** To prevent Out-Of-Memory (OOM) crashes on large payloads in multi-pod deployments, the bot does not keep these large byte buffers in local Python dictionary memory. Instead, the `FileCardHandler` injects the native Bot Framework `Storage` provider (such as the custom `S3Storage` backend).
-*   **Base64 Offloading:** When a large query completes, the raw Excel bytes are `base64` encoded and written entirely to the configured distributed storage (e.g., AWS S3, MinIO) mapped to a unique `file_<id>` key.
-*   **Just-In-Time Delivery & Cleanup:** When the user clicks "Accept" on the Teams file consent card, the bot securely retrieves the `base64` string from S3, decodes it, uploads it to OneDrive/SharePoint via the Bot Framework API, and immediately deletes the payload from S3 to ensure no stale data remains persisted.
+*   **Storage Injection:** To prevent Out-Of-Memory (OOM) crashes on large payloads in multi-pod deployments, the bot does not keep these large byte buffers in local Python dictionary memory. Instead, the `FileCardHandler` injects the native Bot Framework `Storage` provider (such as the custom `S3Storage`, `CosmosDBStorage`, or `BlobStorage` backends).
+*   **Base64 Offloading:** When a large query completes, the raw Excel bytes are `base64` encoded and written entirely to the configured distributed storage (e.g., AWS S3, Azure Cosmos DB, Azure Blob) mapped to a unique `file_<id>` key.
+*   **Just-In-Time Delivery & Cleanup:** When the user clicks "Accept" on the Teams file consent card, the bot securely retrieves the `base64` string from the distributed storage, decodes it, uploads it to OneDrive/SharePoint via the Bot Framework API, and immediately deletes the payload from the storage to ensure no stale data remains persisted.
 *   **Fallback:** If `USE_CONTEXT` is disabled, it safely falls back to storing the bytes locally in a class-level dictionary (`FileCardHandler._pending_files`).
 
 ## 5. Multi-Scope Authentication Explained
@@ -133,7 +133,7 @@ For environments where users should authenticate directly with their own Databri
 1. **Interactive Login**: When users interact with the bot, if they are not authenticated, they receive an Adaptive Login Card with a unique Authorization URL.
 2. **Authorization Code Flow**: The user completes the login in their browser. The Databricks Account Console redirects back to the bot's `/api/oauth/callback` endpoint with an authorization code.
 3. **Workspace Selection (Account-Level Only)**: If Account-Level authentication is configured (`DATABRICKS_ACCOUNT_HOST` and `DATABRICKS_ACCOUNT_ID`), the bot dynamically fetches the list of available workspaces via the Databricks Account API. It presents these to the user via an Adaptive Card, and the chosen workspace URL is saved to their active session.
-4. **Token Exchange & Caching**: The bot exchanges the code for an `access_token` and `refresh_token`. These tokens are encrypted using `TokenEncryptor` and cached alongside an `expires_at` timestamp in the `UserToken` table (or in Bot Framework State memory, which can be backed by S3).
+4. **Token Exchange & Caching**: The bot exchanges the code for an `access_token` and `refresh_token`. These tokens are encrypted using `TokenEncryptor` and cached alongside an `expires_at` timestamp in the `UserToken` table (or in Bot Framework State memory, which can be backed by S3, Cosmos DB, or Azure Blob).
 5. **Automated Refresh**: Before making any Databricks SDK calls, the `message_handler` checks the `expires_at` timestamp. If the token is expired, it uses `oauth_handler.refresh_token` to automatically renew it in the background, ensuring continuous access without requiring the user to manually log in every hour.
 
 ## 6. Architecture & Request Flow
@@ -149,6 +149,6 @@ For environments where users should authenticate directly with their own Databri
 
 ## 6. Setup & Configuration Checklist
 - Ensure `uv` is used for package management (`uv sync`).
-- Environment variables must be configured in `.env` (Azure AD details, MS Teams Bot ID/Secret, Databricks Host, Database URL, Token Encryption Key, and S3 Storage vars if using distributed state).
+- Environment variables must be configured in `.env` (Azure AD details, MS Teams Bot ID/Secret, Databricks Host, Database URL, Token Encryption Key, and Distributed Storage vars if using S3, Cosmos, or Blob).
 - Requires Microsoft Graph API permissions: `GroupMember.Read.All`, `User.Read.All`.
-- Can run locally using SQLite/MemoryStorage or scale via PostgreSQL and S3Storage. Start the bot with `uv run python main.py`.
+- Can run locally using SQLite/MemoryStorage or scale via PostgreSQL and distributed State Storage (S3/Cosmos/Blob). Start the bot with `uv run python main.py`.
