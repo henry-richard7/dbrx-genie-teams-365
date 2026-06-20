@@ -1,19 +1,25 @@
 # 🧞‍♂️ Databricks Genie Teams Bot
 
-A powerful, production-ready Microsoft Teams bot that interfaces seamlessly with Databricks Genie. It provides natural language data analytics, AI-driven insights, and rich data visualizations directly within your Teams chat. Built on FastAPI, AsyncIO, and SQLModel, this bot handles multi-tenant, enterprise-scale data interactions securely and asynchronously.
+<div align="center">
+  <p><strong>A production-ready Microsoft Teams chatbot integrating Databricks Genie, FastAPI, and AI for real-time data analytics.</strong></p>
+</div>
+
+Welcome to the **Databricks Genie Teams Bot** repository. This powerful, production-ready **Microsoft Teams chatbot** interfaces seamlessly with **Databricks Genie** to deliver natural language data analytics, AI-driven insights, and rich data visualizations directly within your enterprise Teams chat. 
+
+Built using modern Python frameworks like **FastAPI**, **AsyncIO**, and **SQLModel**, this enterprise chatbot handles multi-tenant, large-scale data interactions securely and asynchronously. Whether you need generative AI summaries, automated SQL execution, or interactive Adaptive Cards, this bot is the perfect bridge between Microsoft 365 and your Databricks ecosystem.
 
 ---
 
 ## 🌟 Key Features
 
-*   **🗣️ Natural Language Queries**: Ask questions about your data in plain English (e.g., *"What were our top 5 products by revenue last quarter?"*).
-*   **📊 Rich Adaptive Cards & Dynamic Charts**: Automatically visualizes query results with interactive charts (Vertical Bars, Grouped Bars, Donuts, Stacked Horizontal Bars) and structured data tables. Includes robust parsing to handle unexpected conversational text from LLMs.
-*   **🧠 AI Summarization & Insights**: Uses Databricks-hosted LLMs to automatically generate concise summaries and "Next Best Actions" based on the data. (Optional, can be toggled via config).
-*   **📂 Excel Export**: Automatically converts large datasets (>100 rows) into downloadable Excel files to bypass Teams payload limits.
-*   **🔐 Multi-Tenant Scoped Access Control**: Dynamically resolves user credentials using Microsoft Entra ID (Azure AD) security groups. Users only query Databricks using the service principals they are explicitly authorized for. Support for user-specific Custom OAuth with automatic token refresh capabilities is also included.
-*   **🔒 Encrypted Credentials**: User OAuth access and refresh tokens are securely encrypted at rest.
-*   **☁️ S3 State Storage**: Optional scalable S3-compatible backend (AWS S3, MinIO, etc.) for distributed conversational state management.
-*   **🚀 Highly Scalable & Asynchronous**: Built with `FastAPI` and `aiosqlite`/`asyncio` to handle concurrent users without blocking.
+*   **🗣️ Natural Language Data Analytics**: Ask complex questions about your data in plain English (e.g., *"What were our top 5 products by revenue last quarter?"*) and let the bot generate the SQL.
+*   **📊 Rich Adaptive Cards & Dynamic Charts**: Automatically visualizes Databricks query results with interactive charts (Vertical Bars, Grouped Bars, Donuts, Stacked Horizontal Bars) and structured UI data tables. 
+*   **🧠 AI Chatbot Summarization & Insights**: Uses Databricks-hosted LLMs (Large Language Models like GPT-4o, Llama 3) to automatically generate concise summaries and "Next Best Actions" based on the data.
+*   **📂 Excel Export for Big Data**: Automatically converts large SQL datasets (>100 rows) into downloadable Excel files to bypass Microsoft Teams payload limits.
+*   **🔐 Multi-Tenant Scoped Access Control (Azure AD)**: Dynamically resolves user credentials using Microsoft Entra ID (Azure AD) security groups. Users query Databricks using authorized Service Principals (M2M) or interactive Custom OAuth (U2M).
+*   **🔒 Encrypted Credentials & Security**: User OAuth access tokens and refresh tokens are securely encrypted at rest.
+*   **☁️ Distributed S3 State Storage**: Optional scalable S3-compatible backend (AWS S3, MinIO) for distributed Microsoft Bot Framework conversational state management.
+*   **🚀 Highly Scalable API Backend**: Built with `FastAPI` and `aiosqlite`/`asyncio` to handle concurrent enterprise users without blocking.
 
 ---
 
