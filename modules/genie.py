@@ -14,11 +14,14 @@ from databricks.sdk.service.dashboards import GenieAPI
 from dotenv import load_dotenv
 
 
-from utils.sync_lru_cache_async import sync_lru_cache_async
+
 
 load_dotenv()
 
 logger = logging.getLogger(__name__)
+
+# Global cache for Genie Spaces to reduce Databricks API calls
+_SPACES_CACHE = {}
 
 
 class Genie:
@@ -239,21 +242,27 @@ class Genie:
                 }
         return {}
 
-    @sync_lru_cache_async(maxsize=1)
     async def get_spaces(self) -> List[Any]:
         """Retrieves a list of all accessible Genie spaces.
 
-        This method is cached to prevent redundant API calls across multiple interactions.
+        This method uses a global memory cache keyed by credentials 
+        to prevent redundant API calls across multiple user interactions.
 
         Returns:
             List[Any]: A list of available Genie space objects.
         """
+        cache_key = (self._client_id, self._databricks_host, self._databricks_token)
+        if cache_key in _SPACES_CACHE:
+            return _SPACES_CACHE[cache_key]
+
         try:
             loop = asyncio.get_running_loop()
             spaces_response = await loop.run_in_executor(
                 None, self.genie_api.list_spaces
             )
-            return spaces_response.spaces or []
+            spaces = spaces_response.spaces or []
+            _SPACES_CACHE[cache_key] = spaces
+            return spaces
         except Exception as e:
             logger.error(f"Error getting spaces: {str(e)}", exc_info=True)
             return []

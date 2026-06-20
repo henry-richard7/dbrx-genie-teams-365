@@ -38,7 +38,16 @@ class Database:
                 "DATABASE_URL", "sqlite+aiosqlite:///teams_genie_bot.db"
             )
         logger.debug(f"Initializing Database with URL: {db_url}")
-        self.engine = create_async_engine(db_url)
+        
+        engine_kwargs = {}
+        if "postgresql" in db_url:
+            engine_kwargs = {
+                "pool_size": 20,
+                "max_overflow": 10,
+                "pool_pre_ping": True,
+            }
+        
+        self.engine = create_async_engine(db_url, **engine_kwargs)
         self.encryptor = TokenEncryptor(CONFIG.TOKEN_ENCRYPTION_KEY)
 
     async def create_tables(self):

@@ -26,6 +26,20 @@ from microsoft_agents.activity.teams import (
 )
 
 
+class FileCacheStoreItem:
+    """Wrapper to satisfy the Bot Framework StoreItem interface."""
+    def __init__(self, data: dict = None, **kwargs):
+        self.data = data or kwargs
+
+    def store_item_to_json(self) -> dict:
+        return self.data
+        
+    @staticmethod
+    def from_json_to_store_item(json_data: dict) -> "FileCacheStoreItem":
+        return FileCacheStoreItem(json_data)
+
+
+
 class FileCardHandler:
     """A handler class that manages file uploads and downloads in Microsoft Teams.
 
@@ -71,10 +85,10 @@ class FileCardHandler:
         if self.storage:
             encoded = base64.b64encode(file_bytes).decode('utf-8')
             await self.storage.write({
-                f"file_{file_id}": {
+                f"file_{file_id}": FileCacheStoreItem({
                     'bytes': encoded,
                     'timestamp': time.time()
-                }
+                })
             })
         else:
             self._cleanup_expired_files()
@@ -86,10 +100,18 @@ class FileCardHandler:
     async def _get_and_delete_file_bytes(self, file_id: str) -> bytes | None:
         """Retrieves file bytes from storage/cache and immediately deletes them to free memory."""
         if self.storage:
-            data = await self.storage.read([f"file_{file_id}"])
+            data = await self.storage.read([f"file_{file_id}"], target_cls=FileCacheStoreItem)
             if f"file_{file_id}" in data:
                 file_data = data[f"file_{file_id}"]
-                encoded = file_data.get('bytes')
+                if hasattr(file_data, "store_item_to_json"):
+                    encoded = file_data.store_item_to_json().get('bytes')
+                elif isinstance(file_data, dict):
+                    encoded = file_data.get('bytes')
+                elif hasattr(file_data, "data"):
+                    encoded = file_data.data.get('bytes')
+                else:
+                    encoded = None
+                    
                 await self.storage.delete([f"file_{file_id}"])
                 return base64.b64decode(encoded) if encoded else None
             return None
