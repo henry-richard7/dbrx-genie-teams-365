@@ -72,6 +72,24 @@ if environ.get("STORAGE") == "cosmos":
         credential=credential
     )
     STORAGE = CosmosDBStorage(config=config)
+elif environ.get("STORAGE") == "blob":
+    from microsoft_agents.storage.blob import BlobStorage, BlobStorageConfig
+    
+    connection_string = environ.get("AZURE_BLOB_CONNECTION_STRING")
+    url = environ.get("AZURE_BLOB_URL")
+    credential = None
+    
+    if not connection_string:
+        from azure.identity.aio import DefaultAzureCredential
+        credential = DefaultAzureCredential()
+
+    config = BlobStorageConfig(
+        container_name=environ.get("AZURE_BLOB_CONTAINER", "bot-state"),
+        connection_string=connection_string or "",
+        url=url or "",
+        credential=credential
+    )
+    STORAGE = BlobStorage(config=config)
 elif environ.get("STORAGE") == "s3":
     STORAGE = S3Storage(
         bucket_name=environ.get("S3_BUCKET_NAME"),

@@ -52,6 +52,7 @@ The codebase is highly modularized into distinct directories based on their func
 ### `storages/` (State Storage)
 *   **`s3_storage.py`**: Custom S3-compatible storage backend (AWS S3, MinIO) for Bot Framework's `Storage` protocol, enabling scalable distributed caching of conversational and user state.
 *   **Azure Cosmos DB**: Natively supported via `microsoft-agents-storage-cosmos` for enterprise-grade partitioned state storage using Managed Identities.
+*   **Azure Blob Storage**: Natively supported via `microsoft-agents-storage-blob` for persistent storage using Managed Identities.
 
 ### `database/` (Data Persistence)
 *   **`database.py`**: Manages the async SQL connection pool and session lifecycle via `sqlalchemy.ext.asyncio`.
