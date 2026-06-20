@@ -120,7 +120,7 @@ Here is the detailed breakdown of the mechanism:
 4. **Dynamic Scoping & Session State:** If a user belongs to multiple mapped groups (e.g., they are in both Finance and HR groups), the bot prompts them to explicitly select an active "scope" (environment) for their current session. This selection is persisted in the `UserSelection` table.
 5. **Execution Context Injection:** When a user asks a data question, the bot retrieves the `client_id` and `client_secret` corresponding to their active scope. All Databricks SDK calls (like initializing the `WorkspaceClient`) dynamically use these credentials. This guarantees that users can only query Databricks Genie spaces that their Service Principal is explicitly authorized to view, completely avoiding the use of global, over-privileged static tokens.
 
-### 5.2 Protection Against IDOR & Impersonation
+### 5.1 Protection Against IDOR & Impersonation
 In systems where users can select their scope or workspace, there is a risk of **Insecure Direct Object Reference (IDOR)** or **Impersonation**. This occurs if a malicious user manually modifies their request or database state to specify a `user_group_id` or `space_id` they do not own.
 
 The bot mitigates this through strict server-side validation:
@@ -128,7 +128,7 @@ The bot mitigates this through strict server-side validation:
 * **Just-In-Time Authorization:** Before executing *any* Databricks query, the bot re-verifies that the `user_group_id` requested in the `UserSelection` actually exists in the live list of groups returned by the Microsoft Graph API for that specific user's `aadObjectId`.
 *   **Access Denied:** If the requested group ID is not found in the user's Graph API results, the bot throws an authorization exception and denies the query, preventing the IDOR attack. Users cannot impersonate other roles or access isolated data spaces.
 
-### 5.3 Interactive User-Specific Custom OAuth (U2M)
+### 5.2 Interactive User-Specific Custom OAuth (U2M)
 For environments where users should authenticate directly with their own Databricks accounts rather than using a Service Principal, the bot supports a full interactive OAuth flow:
 1. **Interactive Login**: When users interact with the bot, if they are not authenticated, they receive an Adaptive Login Card with a unique Authorization URL.
 2. **Authorization Code Flow**: The user completes the login in their browser. The Databricks Account Console redirects back to the bot's `/api/oauth/callback` endpoint with an authorization code.
@@ -147,7 +147,7 @@ For environments where users should authenticate directly with their own Databri
 4.  **UI Generation:** The `AdaptiveCardTemplate` constructs a rich UI payload containing the summary, dynamic chart, and tabular data.
 5.  **Delivery:** The bot replies to the Teams user. If the data exceeds 100 rows, it triggers the `file_card_handler` to negotiate a file upload for an Excel export instead of rendering an massive inline table.
 
-## 6. Setup & Configuration Checklist
+## 7. Setup & Configuration Checklist
 - Ensure `uv` is used for package management (`uv sync`).
 - Environment variables must be configured in `.env` (Azure AD details, MS Teams Bot ID/Secret, Databricks Host, Database URL, Token Encryption Key, and Distributed Storage vars if using S3, Cosmos, or Blob).
 - Requires Microsoft Graph API permissions: `GroupMember.Read.All`, `User.Read.All`.
