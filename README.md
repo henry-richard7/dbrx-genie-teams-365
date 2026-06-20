@@ -180,14 +180,34 @@ Alternatively, if you want users to explicitly authenticate with their own Datab
 
 ## 🤖 User Guide & Interaction Flow
 
-1. **Listing Spaces**: 
-   Start by typing **`list genie spaces`** in the Teams chat. (The bot uses fuzzy matching, so variations like "show spaces" will also work).
+The interaction flow depends on how the bot's authentication is configured. When a user first interacts with the bot (e.g., by typing **`list genie spaces`**), one of the following authentication scenarios occurs:
+
+### Scenario 1: Interactive Custom OAuth (User-to-Machine / U2M)
+*(Triggered if `DATABRICKS_OAUTH_CLIENT_ID` is set)*
+1. **Login Prompt**: The bot responds with a "Login to Databricks" Adaptive Card.
+2. **Authentication**: The user clicks "Sign In", logs into Databricks in their browser, and authorizes the application. The bot securely encrypts and caches the resulting tokens.
+3. **Workspace Selection (Account-Level Auth Only)**: If `DATABRICKS_ACCOUNT_HOST` is used instead of a single `DATABRICKS_HOST`, the bot dynamically fetches the workspaces the user has access to and prompts them to select one.
+4. **Listing Spaces**: Once authenticated (and workspace selected), the bot fetches and displays the available Genie Spaces.
+
+### Scenario 2: Entra ID Security Group Scoping (Machine-to-Machine / M2M)
+*(Triggered if global `DATABRICKS_TOKEN`, global `DATABRICKS_CLIENT_ID`, and U2M OAuth are NOT configured)*
+1. **Group Resolution**: The bot queries Microsoft Graph API to find the user's Azure AD group memberships.
 2. **Scope Selection**: 
-   If your Microsoft account belongs to multiple security groups mapped to different Databricks environments, the bot will prompt you to select which scope/credentials you want to use for this session.
-3. **Select a Space**: 
-   Click on one of the available Databricks Genie spaces returned in the Adaptive Card.
-4. **Ask Questions**: 
-   Type your query naturally! 
+   - If the user belongs to *multiple* mapped security groups, the bot sends an Adaptive Card asking them to select an "Access Scope" (e.g., Finance-Dev vs. Finance-Prod).
+   - If the user belongs to only *one* mapped group, it silently defaults to that scope.
+3. **Listing Spaces**: The bot uses the M2M Service Principal tied to the selected scope to fetch the Genie Spaces.
+
+### Scenario 3: Global Authentication
+*(Triggered if `DATABRICKS_TOKEN` or global M2M client ID/secret is configured and no advanced auth is set)*
+1. **Listing Spaces**: The bot skips all user prompts and immediately fetches the Genie Spaces using the globally configured service principal or PAT.
+
+---
+
+### Asking Questions
+
+Once the authentication flow is complete and the spaces are listed:
+1. **Select a Space**: Click on one of the available Databricks Genie spaces returned in the Adaptive Card.
+2. **Ask Questions**: Type your query naturally! 
    *   *Example: "Show me the top 10 customers by revenue this year."*
    *   The bot will reply with a 3-part card:
        1. An **AI Summary** of the trends.
