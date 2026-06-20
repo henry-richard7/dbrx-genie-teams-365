@@ -18,7 +18,7 @@ Built using modern Python frameworks like **FastAPI**, **AsyncIO**, and **SQLMod
 *   **📂 Distributed Excel Export for Big Data**: Automatically converts large SQL datasets (>100 rows) into downloadable Excel files to bypass Microsoft Teams payload limits. Temporarily caches data payloads natively in Bot Framework state (via S3, MinIO, or memory) to prevent node memory exhaustion (only if `USE_CONTEXT` is enabled; otherwise, falls back to local application memory caching).
 *   **🔐 Multi-Tenant Scoped Access Control (Azure AD)**: Dynamically resolves user credentials using Microsoft Entra ID (Azure AD) security groups. Users query Databricks using authorized Service Principals (M2M) or interactive Custom OAuth (U2M).
 *   **🔒 Encrypted Credentials & Security**: User OAuth access tokens and refresh tokens are securely encrypted at rest.
-*   **☁️ Distributed S3 State Storage**: Optional scalable S3-compatible backend (AWS S3, MinIO) for distributed Microsoft Bot Framework conversational state management.
+*   **☁️ Distributed State Storage**: Optional scalable S3-compatible backend (AWS S3, MinIO) or Azure Cosmos DB for distributed Microsoft Bot Framework conversational state management.
 *   **🚀 Highly Scalable API Backend**: Built with `FastAPI` and `aiosqlite`/`asyncio` to handle concurrent enterprise users without blocking.
 
 ---
@@ -119,15 +119,24 @@ OAUTH_REDIRECT_URI=<Your Bot Domain>/api/oauth/callback
 # Set this to a PostgreSQL or Azure SQL connection string for multi-pod production scaling!
 DATABASE_URL=postgresql+asyncpg://user:pass@host/dbname
 
-# Optional: S3 & State Storage Settings
+# Optional: State Storage Settings
 USE_CONTEXT=false
-STORAGE=s3 # Set to 's3' if USE_CONTEXT is true and you want distributed state
+STORAGE=s3 # Set to 's3' or 'cosmos' if USE_CONTEXT is true and you want distributed state
+
+# If STORAGE=s3
 S3_BUCKET_NAME=your_s3_bucket
 S3_ENDPOINT_URL=http://localhost:9000 # Omit for real AWS S3
 S3_ACCESS_KEY_ID=minioadmin
 S3_SECRET_ACCESS_KEY=minioadmin
 S3_REGION=us-east-1
 S3_KEY_PREFIX=agent-state/
+
+# If STORAGE=cosmos
+COSMOS_DB_ENDPOINT=https://your-cosmos-db-account.documents.azure.com:443/
+COSMOS_DB_KEY=your-cosmos-db-primary-or-secondary-key # Omit to use Azure Managed Identity
+COSMOS_DB_DATABASE=BotStateDb
+COSMOS_DB_CONTAINER=BotStateContainer
+COSMOS_DB_DISABLE_SSL=false # Set to true when using local Cosmos DB Emulator
 
 # Optional: Token Encryption Settings
 TOKEN_ENCRYPTION_KEY=your_generated_fernet_key_here

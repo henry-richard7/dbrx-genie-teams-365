@@ -47,7 +47,32 @@ CONFIG = DefaultConfig()
 
 agents_sdk_config = load_configuration_from_env(environ)
 
-if environ.get("STORAGE") == "s3":
+if environ.get("STORAGE") == "cosmos":
+    from microsoft_agents.storage.cosmos import CosmosDBStorage, CosmosDBStorageConfig
+    from azure.cosmos import documents
+    
+    cosmos_client_options = {}
+    if environ.get("COSMOS_DB_DISABLE_SSL", "false").lower() == "true":
+        connection_policy = documents.ConnectionPolicy()
+        connection_policy.DisableSSLVerification = True
+        cosmos_client_options["connection_policy"] = connection_policy
+
+    auth_key = environ.get("COSMOS_DB_KEY")
+    credential = None
+    if not auth_key:
+        from azure.identity.aio import DefaultAzureCredential
+        credential = DefaultAzureCredential()
+
+    config = CosmosDBStorageConfig(
+        cosmos_db_endpoint=environ.get("COSMOS_DB_ENDPOINT"),
+        auth_key=auth_key or "",
+        database_id=environ.get("COSMOS_DB_DATABASE", "BotStateDb"),
+        container_id=environ.get("COSMOS_DB_CONTAINER", "BotStateContainer"),
+        cosmos_client_options=cosmos_client_options,
+        credential=credential
+    )
+    STORAGE = CosmosDBStorage(config=config)
+elif environ.get("STORAGE") == "s3":
     STORAGE = S3Storage(
         bucket_name=environ.get("S3_BUCKET_NAME"),
         endpoint_url=environ.get("S3_ENDPOINT_URL"),  # None → real AWS S3
