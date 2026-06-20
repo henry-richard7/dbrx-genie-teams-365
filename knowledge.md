@@ -11,7 +11,7 @@ The **Databricks Genie Teams Bot** is a production-ready Microsoft Teams bot bui
 *   **Rich Visualizations & Adaptive Cards:** Generates interactive charts (bar, donut, stacked) and data tables using Microsoft Adaptive Cards.
 *   **AI Summarization:** Uses Databricks-hosted LLMs (or compatible endpoints like OpenAI) to summarize data and propose "Next Best Actions".
 *   **Excel Export:** Automatically generates downloadable Excel files for datasets exceeding 100 rows to bypass Teams API limits.
-*   **Multi-Tenant & Scoped Access Control:** Dynamically resolves user credentials using Microsoft Entra ID (Azure AD) security groups, mapping them to scoped Databricks Service Principals. Also supports Interactive User-Specific Custom OAuth (U2M) with automated background token refresh.
+*   **Multi-Tenant & Scoped Access Control:** Dynamically resolves user credentials using Microsoft Entra ID (Azure AD) security groups, mapping them to scoped Databricks Service Principals. Also supports Interactive User-Specific Custom OAuth (U2M) at both the Workspace-level and Account-level, providing a dynamic workspace selection flow and automated background token refresh.
 *   **Scalable & Asynchronous:** Built with FastAPI, AsyncIO, and SQLModel/aiosqlite (or asyncpg for Postgres) to handle concurrent requests without blocking.
 
 ## 2. Technology Stack
@@ -122,8 +122,9 @@ The bot mitigates this through strict server-side validation:
 For environments where users should authenticate directly with their own Databricks accounts rather than using a Service Principal, the bot supports a full interactive OAuth flow:
 1. **Interactive Login**: When users interact with the bot, if they are not authenticated, they receive an Adaptive Login Card with a unique Authorization URL.
 2. **Authorization Code Flow**: The user completes the login in their browser. The Databricks Account Console redirects back to the bot's `/api/oauth/callback` endpoint with an authorization code.
-3. **Token Exchange & Caching**: The bot exchanges the code for an `access_token` and `refresh_token`. These tokens are encrypted using `TokenEncryptor` and cached alongside an `expires_at` timestamp in the `UserToken` table (or in Bot Framework State memory, which can be backed by S3).
-4. **Automated Refresh**: Before making any Databricks SDK calls, the `message_handler` checks the `expires_at` timestamp. If the token is expired, it uses `oauth_handler.refresh_token` to automatically renew it in the background, ensuring continuous access without requiring the user to manually log in every hour.
+3. **Workspace Selection (Account-Level Only)**: If Account-Level authentication is configured (`DATABRICKS_ACCOUNT_HOST` and `DATABRICKS_ACCOUNT_ID`), the bot dynamically fetches the list of available workspaces via the Databricks Account API. It presents these to the user via an Adaptive Card, and the chosen workspace URL is saved to their active session.
+4. **Token Exchange & Caching**: The bot exchanges the code for an `access_token` and `refresh_token`. These tokens are encrypted using `TokenEncryptor` and cached alongside an `expires_at` timestamp in the `UserToken` table (or in Bot Framework State memory, which can be backed by S3).
+5. **Automated Refresh**: Before making any Databricks SDK calls, the `message_handler` checks the `expires_at` timestamp. If the token is expired, it uses `oauth_handler.refresh_token` to automatically renew it in the background, ensuring continuous access without requiring the user to manually log in every hour.
 
 ## 6. Architecture & Request Flow
 

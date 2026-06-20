@@ -22,6 +22,8 @@ class OAuthHandler:
     def __init__(self):
         """Initializes the OAuthHandler using values from the global config."""
         self.databricks_host = getattr(CONFIG, "DATABRICKS_HOST", None)
+        self.account_host = getattr(CONFIG, "DATABRICKS_ACCOUNT_HOST", None)
+        self.account_id = getattr(CONFIG, "DATABRICKS_ACCOUNT_ID", None)
         self.client_id = getattr(CONFIG, "DATABRICKS_OAUTH_CLIENT_ID", None)
         self.client_secret = getattr(CONFIG, "DATABRICKS_OAUTH_CLIENT_SECRET", None)
         self.redirect_uri = getattr(CONFIG, "OAUTH_REDIRECT_URI", None)
@@ -29,7 +31,9 @@ class OAuthHandler:
 
     def is_configured(self) -> bool:
         """Returns True if the custom OAuth flow is configured with a redirect URI."""
-        return bool(self.redirect_uri and self.client_id and self.databricks_host)
+        has_workspace_auth = bool(self.redirect_uri and self.client_id and self.databricks_host)
+        has_account_auth = bool(self.redirect_uri and self.client_id and self.account_host and self.account_id)
+        return has_workspace_auth or has_account_auth
 
     def get_auth_url(self, state: str) -> str:
         """Generates the authorization URL for Databricks."""
@@ -46,9 +50,13 @@ class OAuthHandler:
             "state": state,
         }
         query_string = urllib.parse.urlencode(params)
-        # Ensure host doesn't have a trailing slash
-        host = self.databricks_host.rstrip("/")
-        return f"{host}/oidc/v1/authorize?{query_string}"
+        
+        if self.account_host and self.account_id:
+            host = self.account_host.rstrip("/")
+            return f"{host}/oidc/accounts/{self.account_id}/v1/authorize?{query_string}"
+        else:
+            host = self.databricks_host.rstrip("/")
+            return f"{host}/oidc/v1/authorize?{query_string}"
 
     async def exchange_code(self, code: str) -> dict:
         """Exchanges the authorization code for access and refresh tokens.
@@ -56,8 +64,12 @@ class OAuthHandler:
         Returns:
             dict: The JSON response containing access_token, refresh_token, and expires_in.
         """
-        host = self.databricks_host.rstrip("/")
-        url = f"{host}/oidc/v1/token"
+        if self.account_host and self.account_id:
+            host = self.account_host.rstrip("/")
+            url = f"{host}/oidc/accounts/{self.account_id}/v1/token"
+        else:
+            host = self.databricks_host.rstrip("/")
+            url = f"{host}/oidc/v1/token"
 
         data = {
             "client_id": self.client_id,
@@ -90,8 +102,12 @@ class OAuthHandler:
         Returns:
             dict: The JSON response containing access_token, refresh_token, and expires_in.
         """
-        host = self.databricks_host.rstrip("/")
-        url = f"{host}/oidc/v1/token"
+        if self.account_host and self.account_id:
+            host = self.account_host.rstrip("/")
+            url = f"{host}/oidc/accounts/{self.account_id}/v1/token"
+        else:
+            host = self.databricks_host.rstrip("/")
+            url = f"{host}/oidc/v1/token"
 
         data = {
             "client_id": self.client_id,

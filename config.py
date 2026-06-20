@@ -26,6 +26,8 @@ class DefaultConfig(AgentAuthConfiguration):
         DATABRICKS_OAUTH_CLIENT_SECRET (str): The Databricks OAuth Client Secret.
         OAUTH_REDIRECT_URI (str): The OAuth redirect URI for authentication callbacks.
         DATABRICKS_HOST (str): The Databricks workspace host URL.
+        DATABRICKS_ACCOUNT_HOST (str): The Databricks Account Console URL for account-level auth.
+        DATABRICKS_ACCOUNT_ID (str): The Databricks Account ID for account-level auth.
         USE_CONTEXT (bool): Whether to use context storage for state management.
         TOKEN_ENCRYPTION_KEY (str): The Fernet key used to encrypt OAuth tokens.
     """
@@ -53,5 +55,7 @@ class DefaultConfig(AgentAuthConfiguration):
         self.DATABRICKS_OAUTH_CLIENT_SECRET = environ.get("DATABRICKS_OAUTH_CLIENT_SECRET")
         self.OAUTH_REDIRECT_URI = environ.get("OAUTH_REDIRECT_URI")
         self.DATABRICKS_HOST = environ.get("DATABRICKS_HOST")
+        self.DATABRICKS_ACCOUNT_HOST = environ.get("DATABRICKS_ACCOUNT_HOST")
+        self.DATABRICKS_ACCOUNT_ID = environ.get("DATABRICKS_ACCOUNT_ID")
         self.USE_CONTEXT = environ.get("USE_CONTEXT", "false").lower() == "true"
         self.TOKEN_ENCRYPTION_KEY = environ.get("TOKEN_ENCRYPTION_KEY")

@@ -140,20 +140,16 @@ class Database:
         """
         logger.debug(f"Clearing all active space mappings for user: {user_id}")
         async with AsyncSession(self.engine) as session:
-            # Count first so we can report how many were deleted
-            count_stmt = select(GenieSpace).where(GenieSpace.user_id == user_id)
-            count_result = await session.exec(count_stmt)
-            count = len(count_result.all())
-
             # Single bulk DELETE — eliminates N individual round-trips
             delete_stmt = delete(GenieSpace).where(GenieSpace.user_id == user_id)
-            await session.exec(delete_stmt)
+            result = await session.exec(delete_stmt)
             await session.commit()
+            count = result.rowcount
             logger.info(f"Cleared {count} space mappings for user {user_id}")
             return count
 
     async def add_user_selection(
-        self, user_id: str, space_id: str, space_name: str, conversation_id: str
+        self, user_id: str, space_id: str, space_name: str, workspace_host: str, conversation_id: str
     ) -> UserSelection:
         """Adds a new active user selection for a Genie Space.
 
@@ -161,6 +157,7 @@ class Database:
             user_id (str): The Microsoft Teams user ID.
             space_id (str): The selected Genie Space ID.
             space_name (str): The selected Genie Space name.
+            workspace_host (str): The Databricks workspace host.
             conversation_id (str): The active conversation ID for context.
 
         Returns:
@@ -174,6 +171,7 @@ class Database:
                 user_id=user_id,
                 space_id=space_id,
                 space_name=space_name,
+                workspace_host=workspace_host,
                 conversation_id=conversation_id,
             )
             session.add(selection)
@@ -235,7 +233,7 @@ class Database:
             return selection
 
     async def update_user_selection(
-        self, user_id: str, space_id: str, space_name: str, conversation_id: str
+        self, user_id: str, space_id: str, space_name: str, workspace_host: str, conversation_id: str
     ) -> UserSelection:
         """Updates an existing user selection, or creates one if it doesn't exist.
 
@@ -243,6 +241,7 @@ class Database:
             user_id (str): The Microsoft Teams user ID.
             space_id (str): The new Genie Space ID.
             space_name (str): The new Genie Space name.
+            workspace_host (str): The new Workspace host.
             conversation_id (str): The new conversation ID.
 
         Returns:
@@ -259,6 +258,7 @@ class Database:
                 logger.debug(f"Modifying existing selection row for user {user_id}")
                 selection.space_id = space_id
                 selection.space_name = space_name
+                selection.workspace_host = workspace_host
                 selection.conversation_id = conversation_id
             else:
                 logger.debug(
@@ -268,6 +268,7 @@ class Database:
                     user_id=user_id,
                     space_id=space_id,
                     space_name=space_name,
+                    workspace_host=workspace_host,
                     conversation_id=conversation_id,
                 )
 
@@ -329,6 +330,7 @@ class Database:
         user_name: Optional[str] = None,
         user_email: Optional[str] = None,
         scope_name: Optional[str] = None,
+        workspace_host: Optional[str] = None,
         space_name: Optional[str] = None,
         space_id: Optional[str] = None,
         conversation_id: Optional[str] = None,
@@ -345,6 +347,7 @@ class Database:
             user_name (str, optional): The name of the user.
             user_email (str, optional): The email of the user.
             scope_name (str, optional): The scope/security group name.
+            workspace_host (str, optional): The selected workspace host.
             space_name (str, optional): The name of the Genie space.
             space_id (str, optional): The ID of the Genie space.
             conversation_id (str, optional): The ID of the Genie conversation.
@@ -364,6 +367,7 @@ class Database:
                 user_name=user_name,
                 user_email=user_email,
                 scope_name=scope_name,
+                workspace_host=workspace_host,
                 space_name=space_name,
                 space_id=space_id,
                 conversation_id=conversation_id,

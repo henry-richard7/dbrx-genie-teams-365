@@ -304,8 +304,10 @@ async def oauth_callback(
                             logging.warning(f"Could not delete OAuth card proactively: {e}")
                             
                         await turn_context.send_activity("✅ Sign-in was successful!")
-                        
-                        turn_context.activity.text = "list genie spaces"
+                        if getattr(CONFIG, "DATABRICKS_ACCOUNT_HOST", None) and getattr(CONFIG, "DATABRICKS_ACCOUNT_ID", None):
+                            turn_context.activity.text = "list workspaces"
+                        else:
+                            turn_context.activity.text = "list genie spaces"
                         turn_context.activity.value = None
                         await AGENT.message_handler.process_message(turn_context)
                             

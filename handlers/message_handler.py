@@ -60,27 +60,90 @@ class MessageHandler:
         self.llm_summarizer = LlmSummarizer()
         self.chart_card_generator = AdaptiveCardChartGenerator()
 
-    async def _check_and_refresh_token(self, turn_context: TurnContext, user_id: str, token_data: dict | None, user_token=None) -> dict | None:
+    async def _get_user_selection_dict(self, turn_context: TurnContext, user_id: str) -> dict:
+        if CONFIG.USE_CONTEXT and self.user_state:
+            prop = self.user_state.create_property("UserSelectionProperty")
+            return await prop.get(turn_context, {})
+        else:
+            sel = await self.database.get_user_selection(user_id)
+            return sel.model_dump() if sel else {}
+
+    async def _set_user_selection_dict(self, turn_context: TurnContext, user_id: str, selection_dict: dict):
+        if CONFIG.USE_CONTEXT and self.user_state:
+            prop = self.user_state.create_property("UserSelectionProperty")
+            selection_dict["user_id"] = user_id
+            await prop.set(turn_context, selection_dict)
+        else:
+            await self.database.update_user_selection(
+                user_id=user_id,
+                space_id=selection_dict.get("space_id", ""),
+                space_name=selection_dict.get("space_name", ""),
+                workspace_host=selection_dict.get("workspace_host"),
+                conversation_id=selection_dict.get("conversation_id")
+            )
+
+    async def _get_user_token_dict(self, turn_context: TurnContext, user_id: str) -> dict | None:
+        if CONFIG.USE_CONTEXT and self.user_state:
+            prop = self.user_state.create_property("UserTokenProperty")
+            token_data = await prop.get(turn_context, {})
+            if not token_data or not token_data.get("access_token"):
+                from utils.bot_utils import BotUtilities
+                out_of_band_token = await BotUtilities.get_out_of_band_token_from_storage(self.user_state, turn_context, user_id)
+                if out_of_band_token and out_of_band_token.get("access_token"):
+                    await prop.set(turn_context, out_of_band_token)
+                    token_data = out_of_band_token
+            return token_data if token_data and token_data.get("access_token") else None
+        else:
+            ut = await self.database.get_user_token(user_id)
+            if ut and ut.access_token:
+                return {
+                    "access_token": ut.access_token,
+                    "refresh_token": ut.refresh_token,
+                    "expires_at": ut.expires_at.isoformat() if ut.expires_at else None
+                }
+            return None
+
+    async def _set_user_token_dict(self, turn_context: TurnContext, user_id: str, token_data: dict):
+        if CONFIG.USE_CONTEXT and self.user_state:
+            prop = self.user_state.create_property("UserTokenProperty")
+            await prop.set(turn_context, token_data)
+        else:
+            from datetime import datetime
+            expires_at_val = token_data.get("expires_at")
+            expires_at = datetime.fromisoformat(expires_at_val) if isinstance(expires_at_val, str) else expires_at_val
+            await self.database.save_user_token(
+                user_id,
+                token_data.get("access_token"),
+                token_data.get("refresh_token"),
+                expires_at
+            )
+
+    async def _delete_user_token(self, turn_context: TurnContext, user_id: str):
+        if CONFIG.USE_CONTEXT and self.user_state:
+            prop = self.user_state.create_property("UserTokenProperty")
+            await prop.delete(turn_context)
+        else:
+            await self.database.delete_user_token(user_id)
+
+    async def _check_and_refresh_token(self, turn_context: TurnContext, user_id: str, token_data: dict) -> dict | None:
         """Helper to check token expiration and refresh it if necessary.
         
         Args:
             turn_context (TurnContext): The context object for the current turn.
             user_id (str): The Microsoft Teams user ID.
-            token_data (dict | None): Context token data.
-            user_token: The database user token record.
+            token_data (dict): The token data dictionary.
             
         Returns:
             dict | None: The decrypted access token inside a dictionary, or None if failed.
         """
         from datetime import datetime, timezone, timedelta
         
-        expires_at_val = token_data.get("expires_at") if token_data else (user_token.expires_at if user_token else None)
-        refresh_token_val = token_data.get("refresh_token") if token_data else (user_token.refresh_token if user_token else None)
-        access_token_val = token_data.get("access_token") if token_data else (user_token.access_token if user_token else None)
+        expires_at_val = token_data.get("expires_at")
+        refresh_token_val = token_data.get("refresh_token")
+        access_token_val = token_data.get("access_token")
 
-        if token_data:
-            access_token_val = ENCRYPTOR.decrypt(access_token_val)
-            refresh_token_val = ENCRYPTOR.decrypt(refresh_token_val)
+        access_token_val = ENCRYPTOR.decrypt(access_token_val)
+        refresh_token_val = ENCRYPTOR.decrypt(refresh_token_val)
 
         if not expires_at_val:
             return {"token": access_token_val}
@@ -95,38 +158,21 @@ class MessageHandler:
                 oauth_handler = OAuthHandler()
                 logger.info(f"Refreshing expired token for user {user_id}")
                 
-                # Use decrypted refresh_token_val for the refresh call
                 new_token = await oauth_handler.refresh_token(refresh_token_val)
                 
                 expires_in = new_token.get("expires_in", 3600)
                 new_expires_at = datetime.now(timezone.utc) + timedelta(seconds=expires_in)
                 
-                if token_data is not None and self.user_state:
-                    # Encrypt before saving to State Storage
-                    token_data["access_token"] = ENCRYPTOR.encrypt(new_token["access_token"])
-                    
-                    new_refresh_token = new_token.get("refresh_token", refresh_token_val)
-                    token_data["refresh_token"] = ENCRYPTOR.encrypt(new_refresh_token)
-                    
-                    token_data["expires_at"] = new_expires_at.isoformat()
-                    user_token_prop = self.user_state.create_property("UserTokenProperty")
-                    await user_token_prop.set(turn_context, token_data)
-                elif user_token:
-                    await self.database.save_user_token(
-                        user_id,
-                        new_token["access_token"],
-                        new_token.get("refresh_token", refresh_token_val),
-                        new_expires_at
-                    )
+                token_data["access_token"] = ENCRYPTOR.encrypt(new_token["access_token"])
+                token_data["refresh_token"] = ENCRYPTOR.encrypt(new_token.get("refresh_token", refresh_token_val))
+                token_data["expires_at"] = new_expires_at.isoformat()
+                
+                await self._set_user_token_dict(turn_context, user_id, token_data)
                 return {"token": new_token["access_token"]}
             return {"token": access_token_val}
         except Exception as e:
             logger.error(f"Failed to refresh token: {e}")
-            if token_data is not None and self.user_state:
-                user_token_prop = self.user_state.create_property("UserTokenProperty")
-                await user_token_prop.delete(turn_context)
-            elif user_token:
-                await self.database.delete_user_token(user_id)
+            await self._delete_user_token(turn_context, user_id)
             return None
 
     async def _clear_space_cache(self, turn_context: TurnContext, user_id: str):
@@ -143,17 +189,19 @@ class MessageHandler:
         else:
             await self.database.clear_user_space_mappings(user_id)
 
-    async def _refresh_and_send_spaces(self, turn_context: TurnContext, user_id: str, creds_kwargs: dict):
+    async def _refresh_and_send_spaces(self, turn_context: TurnContext, user_id: str, creds_kwargs: dict, workspace_host: str = None):
         """Helper to fetch space list and send as activity, wrapping in typing indicator.
         
         Args:
             turn_context (TurnContext): The context object for the current turn.
             user_id (str): The Microsoft Teams user ID.
             creds_kwargs (dict): Credentials to pass to the list spaces handler.
+            workspace_host (str): Optional workspace host to list spaces from.
         """
         list_spaces_kwargs = {
             "turn_context": turn_context,
             "user_id": user_id,
+            "workspace_host": workspace_host,
             **creds_kwargs,
         }
         response = await BotUtilities.keep_typing_while(
@@ -191,24 +239,9 @@ class MessageHandler:
             return {}  # Global credentials implicitly used
 
         # Check for user-specific custom OAuth token
-        if CONFIG.USE_CONTEXT and self.user_state:
-            user_token_prop = self.user_state.create_property("UserTokenProperty")
-            token_data = await user_token_prop.get(turn_context, {})
-            
-            # If the token isn't in the cache, it might have been written out-of-band to S3.
-            if not token_data or not token_data.get("access_token"):
-                from utils.bot_utils import BotUtilities
-                out_of_band_token = await BotUtilities.get_out_of_band_token_from_storage(self.user_state, turn_context, user_id)
-                if out_of_band_token and out_of_band_token.get("access_token"):
-                    await user_token_prop.set(turn_context, out_of_band_token)
-                    token_data = out_of_band_token
-
-            if token_data and token_data.get("access_token"):
-                return await self._check_and_refresh_token(turn_context, user_id, token_data=token_data)
-        else:
-            user_token = await self.database.get_user_token(user_id)
-            if user_token and user_token.access_token:
-                return await self._check_and_refresh_token(turn_context, user_id, token_data=None, user_token=user_token)
+        token_data = await self._get_user_token_dict(turn_context, user_id)
+        if token_data and token_data.get("access_token"):
+            return await self._check_and_refresh_token(turn_context, user_id, token_data=token_data)
 
         # Try fetching token via Azure Bot Service OAuth
         from handlers.oauth_handler import OAuthHandler
@@ -366,6 +399,30 @@ class MessageHandler:
                 logger.warning("Invalid space selection: missing space_name")
                 await turn_context.send_activity("❌ Invalid space selection.")
 
+        elif action == "select_workspace":
+            workspace_name = action_data.get("workspace_name")
+            workspace_host = action_data.get("workspace_host") or action_data.get("manual_workspace_host")
+            
+            if not workspace_host:
+                await turn_context.send_activity("❌ Invalid workspace host. Please try again.")
+                return
+                
+            logger.debug(f"Action 'select_workspace': {workspace_name}, host={workspace_host}")
+            
+            selection_dict = await self._get_user_selection_dict(turn_context, user_id)
+            selection_dict["workspace_host"] = workspace_host
+            selection_dict["space_id"] = ""
+            selection_dict["space_name"] = ""
+            selection_dict["conversation_id"] = ""
+            await self._set_user_selection_dict(turn_context, user_id, selection_dict)
+                
+            await turn_context.delete_activity(turn_context.activity.reply_to_id)
+            await turn_context.send_activity(f"✅ Selected workspace: **{workspace_name or workspace_host}**.")
+            
+            turn_context.activity.text = "list genie spaces"
+            turn_context.activity.value = None
+            await self.process_message(turn_context)
+
         elif action == "select_group":
             logger.debug("Handling 'select_group' action.")
             await turn_context.delete_activity(turn_context.activity.reply_to_id)
@@ -406,7 +463,10 @@ class MessageHandler:
             if creds_kwargs is None:
                 return
 
-            await self._refresh_and_send_spaces(turn_context, user_id, creds_kwargs)
+            selection_dict = await self._get_user_selection_dict(turn_context, user_id)
+            workspace_host = selection_dict.get("workspace_host")
+
+            await self._refresh_and_send_spaces(turn_context, user_id, creds_kwargs, workspace_host)
 
         elif action == "retry_spaces":
             creds_kwargs = await self._get_databricks_credentials_kwargs(
@@ -415,7 +475,10 @@ class MessageHandler:
             if creds_kwargs is None:
                 return
             
-            await self._refresh_and_send_spaces(turn_context, user_id, creds_kwargs)
+            selection_dict = await self._get_user_selection_dict(turn_context, user_id)
+            workspace_host = selection_dict.get("workspace_host")
+                    
+            await self._refresh_and_send_spaces(turn_context, user_id, creds_kwargs, workspace_host)
 
         elif action == "show_help":
             help_message = (
@@ -451,23 +514,11 @@ class MessageHandler:
         logger.info(
             f"handle_space_selection triggered for user: {user_id}, space: {space_name} ({space_id})"
         )
-        if CONFIG.USE_CONTEXT and self.user_state:
-            user_selection_prop = self.user_state.create_property(
-                "UserSelectionProperty"
-            )
-            selection_dict = await user_selection_prop.get(turn_context, {})
-            selection_dict["user_id"] = user_id
-            selection_dict["space_id"] = space_id
-            selection_dict["space_name"] = space_name
-            selection_dict["conversation_id"] = None
-            await user_selection_prop.set(turn_context, selection_dict)
-        else:
-            await self.database.update_user_selection(
-                user_id=user_id,
-                space_id=space_id,
-                space_name=space_name,
-                conversation_id=None,
-            )
+        selection_dict = await self._get_user_selection_dict(turn_context, user_id)
+        selection_dict["space_id"] = space_id
+        selection_dict["space_name"] = space_name
+        selection_dict["conversation_id"] = None
+        await self._set_user_selection_dict(turn_context, user_id, selection_dict)
         logger.debug("User selection updated.")
         await turn_context.delete_activity(turn_context.activity.reply_to_id)
         await turn_context.send_activity(
@@ -521,10 +572,10 @@ class MessageHandler:
 
             if not client_id and not client_secret and not token:
                 logger.debug("Using global Databricks credentials to initialize Genie.")
-                genie = Genie()
+                genie = Genie(workspace_host=getattr(user_selection, "workspace_host", None))
             else:
                 genie = Genie(
-                    client_id=client_id, client_secret=client_secret, token=token
+                    client_id=client_id, client_secret=client_secret, token=token, workspace_host=getattr(user_selection, "workspace_host", None)
                 )
             sending_excel = False
 
@@ -556,20 +607,9 @@ class MessageHandler:
                 logger.debug(
                     f"Updating conversation ID for user {user_id} to {new_conversation_id}"
                 )
-                if CONFIG.USE_CONTEXT and self.user_state:
-                    user_selection_prop = self.user_state.create_property(
-                        "UserSelectionProperty"
-                    )
-                    selection_dict = await user_selection_prop.get(turn_context, {})
-                    selection_dict["conversation_id"] = new_conversation_id
-                    await user_selection_prop.set(turn_context, selection_dict)
-                else:
-                    await self.database.update_user_selection(
-                        user_id,
-                        user_selection.space_id,
-                        user_selection.space_name,
-                        new_conversation_id,
-                    )
+                selection_dict = await self._get_user_selection_dict(turn_context, user_id)
+                selection_dict["conversation_id"] = new_conversation_id
+                await self._set_user_selection_dict(turn_context, user_id, selection_dict)
                 user_selection.conversation_id = new_conversation_id
 
             # Process response
@@ -748,6 +788,7 @@ class MessageHandler:
                     user_name=user_name,
                     user_email=user_email,
                     scope_name=scope_name,
+                    workspace_host=getattr(user_selection, "workspace_host", None),
                     space_name=user_selection.space_name,
                     space_id=user_selection.space_id,
                     conversation_id=user_selection.conversation_id,
@@ -831,7 +872,23 @@ class MessageHandler:
                 text = turn_context.activity.text.strip().lower()
                 logger.debug(f"Processing regular text message: '{text}'")
 
-                if fuzz.partial_ratio(text, COMMAND_LIST_SPACES) >= 70:
+                if fuzz.partial_ratio(text, "list workspaces") >= 80:
+                    logger.debug("Text matches 'list workspaces' command.")
+                    creds_kwargs = await self._get_databricks_credentials_kwargs(
+                        turn_context, send_prompt=True, force_prompt=True
+                    )
+                    if creds_kwargs is None:
+                        return
+                    from handlers.workspace_list_handler import WorkspaceListHandler
+                    handler = WorkspaceListHandler(self.database, self.user_state, self.conversation_state)
+                    await handler.handle_list_workspaces(
+                        turn_context, 
+                        user_id, 
+                        account_host=CONFIG.DATABRICKS_ACCOUNT_HOST,
+                        account_id=CONFIG.DATABRICKS_ACCOUNT_ID,
+                        **creds_kwargs
+                    )
+                elif fuzz.partial_ratio(text, COMMAND_LIST_SPACES) >= 70:
                     # Use fuzzy matching to allow for minor typos
                     logger.debug(
                         f"Text matches '{COMMAND_LIST_SPACES}' command. Fuzzy ratio: {fuzz.partial_ratio(text, COMMAND_LIST_SPACES)}"
@@ -851,22 +908,16 @@ class MessageHandler:
                     # Genie spaces are visible immediately without a manual refresh.
                     await self._clear_space_cache(turn_context, user_id)
 
+                    selection_dict = await self._get_user_selection_dict(turn_context, user_id)
+                    workspace_host = selection_dict.get("workspace_host")
+
                     logger.debug("Calling GenieListHandler to fetch spaces.")
-                    await self._refresh_and_send_spaces(turn_context, user_id, creds_kwargs)
+                    await self._refresh_and_send_spaces(turn_context, user_id, creds_kwargs, workspace_host)
                 else:
                     # Check if user has a space selected
                     logger.debug("Checking if user has an active Genie space selected.")
-                    if CONFIG.USE_CONTEXT and self.user_state:
-                        user_selection_prop = self.user_state.create_property(
-                            "UserSelectionProperty"
-                        )
-                        selection_dict = await user_selection_prop.get(turn_context, {})
-                        if selection_dict:
-                            user_selection = UserSelection(**selection_dict)
-                        else:
-                            user_selection = None
-                    else:
-                        user_selection = await self.database.get_user_selection(user_id)
+                    selection_dict = await self._get_user_selection_dict(turn_context, user_id)
+                    user_selection = UserSelection(**selection_dict) if selection_dict else None
                     if user_selection and user_selection.space_id:
                         logger.info(
                             f"User has selected scope {user_selection.space_id}. Delegating to handle_genie_question."

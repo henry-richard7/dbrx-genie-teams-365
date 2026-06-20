@@ -32,6 +32,7 @@ class UserSelection(SQLModel, table=True):
     # All other strings set to MAX size
     space_id: Optional[str] = Field(default=None, sa_column=Column(Text))
     space_name: Optional[str] = Field(default=None, sa_column=Column(Text))
+    workspace_host: Optional[str] = Field(default=None, sa_column=Column(Text))
     conversation_id: Optional[str] = Field(default=None, sa_column=Column(Text))
     user_group_id: Optional[str] = Field(default=None, sa_column=Column(Text))
 
@@ -59,6 +60,7 @@ class GenieAuditLog(SQLModel, table=True):
     user_email: Optional[str] = Field(default=None, sa_column=Column(Text))
     user_id: str = Field(sa_column=Column(Text))
     scope_name: Optional[str] = Field(default=None, sa_column=Column(Text))
+    workspace_host: Optional[str] = Field(default=None, sa_column=Column(Text))
     space_name: Optional[str] = Field(default=None, sa_column=Column(Text))
     space_id: Optional[str] = Field(default=None, sa_column=Column(Text))
     conversation_id: Optional[str] = Field(default=None, sa_column=Column(Text))

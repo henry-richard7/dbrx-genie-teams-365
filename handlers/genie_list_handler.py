@@ -33,6 +33,39 @@ class GenieListHandler:
         self.conversation_state = conversation_state
         self.config = DefaultConfig()
 
+    async def _get_space_mappings(self, turn_context: TurnContext, user_id: str) -> list[GenieSpace]:
+        if self.config.USE_CONTEXT and self.user_state:
+            space_mappings_prop = self.user_state.create_property("GenieSpaceMappingsProperty")
+            mappings_dict = await space_mappings_prop.get(turn_context, [])
+            return [GenieSpace(**m) for m in mappings_dict]
+        else:
+            return await self.db.get_user_space_mappings(user_id)
+
+    async def _set_space_mappings(self, turn_context: TurnContext, user_id: str, spaces: list):
+        if self.config.USE_CONTEXT and self.user_state:
+            space_mappings_prop = self.user_state.create_property("GenieSpaceMappingsProperty")
+            await space_mappings_prop.set(turn_context, [
+                {
+                    "user_id": user_id,
+                    "space_id": s.space_id,
+                    "space_name": s.title,
+                    "description": s.description,
+                }
+                for s in spaces
+            ])
+        else:
+            await self.db.add_user_space_mappings_bulk(
+                user_id=user_id,
+                spaces=[
+                    {
+                        "space_id": s.space_id,
+                        "space_name": s.title,
+                        "description": s.description,
+                    }
+                    for s in spaces
+                ],
+            )
+
     async def handle_list_spaces(
         self,
         turn_context: TurnContext,
@@ -41,6 +74,7 @@ class GenieListHandler:
         client_secret: str = None,
         token: str = None,
         scope_name: str = None,
+        workspace_host: str = None,
     ) -> Activity:
         """Handles the request to fetch and render available Genie spaces.
 
@@ -54,20 +88,16 @@ class GenieListHandler:
             client_secret (str, optional): The OAuth Client Secret for Databricks. Defaults to None.
             token (str, optional): The User OAuth access token. Defaults to None.
             scope_name (str, optional): The name of the current scope/group (for display purposes). Defaults to None.
+            workspace_host (str, optional): The specific workspace host to query. Defaults to None.
 
         Returns:
             Activity: A Microsoft Teams message activity containing the rendered Adaptive Card.
         """
         try:
-            if self.config.USE_CONTEXT and self.user_state:
-                space_mappings_prop = self.user_state.create_property("GenieSpaceMappingsProperty")
-                mappings_dict = await space_mappings_prop.get(turn_context, [])
-                existing_mappings = [GenieSpace(**m) for m in mappings_dict]
-            else:
-                existing_mappings = await self.db.get_user_space_mappings(user_id)
+            existing_mappings = await self._get_space_mappings(turn_context, user_id)
 
             if not existing_mappings:
-                genie_api = Genie(client_id=client_id, client_secret=client_secret, token=token)
+                genie_api = Genie(client_id=client_id, client_secret=client_secret, token=token, workspace_host=workspace_host)
                 spaces = await genie_api.get_spaces()
 
                 if not spaces:
@@ -75,30 +105,7 @@ class GenieListHandler:
                         "❌ No Genie spaces available at the moment."
                     )
 
-                if self.config.USE_CONTEXT and self.user_state:
-                    space_mappings_prop = self.user_state.create_property("GenieSpaceMappingsProperty")
-                    await space_mappings_prop.set(turn_context, [
-                        {
-                            "user_id": user_id,
-                            "space_id": s.space_id,
-                            "space_name": s.title,
-                            "description": s.description,
-                        }
-                        for s in spaces
-                    ])
-                else:
-                    # Bulk-insert all spaces in a single DB round-trip
-                    await self.db.add_user_space_mappings_bulk(
-                        user_id=user_id,
-                        spaces=[
-                            {
-                                "space_id": s.space_id,
-                                "space_name": s.title,
-                                "description": s.description,
-                            }
-                            for s in spaces
-                        ],
-                    )
+                await self._set_space_mappings(turn_context, user_id, spaces)
 
                 # Build card directly from the API response — no re-fetch needed
                 existing_mappings = [
