@@ -128,7 +128,10 @@ For environments where users should authenticate directly with their own Databri
 
 ## 6. Architecture & Request Flow
 
-1.  **Authentication & Scoping:** A user sends a message. The bot queries MS Graph API to resolve their Entra ID groups. It maps this to a specific Databricks Service Principal via the `SecurityGroupMapping` table.
+1.  **Authentication & Scoping:** A user sends a message. The bot determines the authentication path based on its configuration:
+    *   **U2M Interactive OAuth:** If `DATABRICKS_OAUTH_CLIENT_ID` is set, the user authenticates directly with Databricks via their browser. The bot caches and auto-refreshes their specific tokens, optionally prompting for Workspace selection if Account-Level Auth is enabled.
+    *   **M2M Entra ID Scoping:** If global auth and U2M are NOT configured, the bot queries MS Graph API to resolve the user's Azure AD groups, mapping them to specific Databricks Service Principals via the `SecurityGroupMapping` table. It prompts the user if they belong to multiple mapped groups.
+    *   **Global Auth:** Uses a globally configured `DATABRICKS_TOKEN` or Service Principal, bypassing user-specific scoping.
 2.  **Genie Execution:** The bot passes the user's plain-English question to the Databricks Genie API using the resolved credentials. Genie executes the text-to-SQL pipeline and returns raw data.
 3.  **AI Insights (Optional):** The raw data is sent to an LLM endpoint (via `llm_summarizer.py`) to generate a natural language summary and determine the most appropriate chart type.
 4.  **UI Generation:** The `AdaptiveCardTemplate` constructs a rich UI payload containing the summary, dynamic chart, and tabular data.
