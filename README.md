@@ -189,6 +189,35 @@ The interaction flow depends on how the bot's authentication is configured. When
 3. **Workspace Selection (Account-Level Auth Only)**: If `DATABRICKS_ACCOUNT_HOST` is used instead of a single `DATABRICKS_HOST`, the bot dynamically fetches the workspaces the user has access to and prompts them to select one.
 4. **Listing Spaces**: Once authenticated (and workspace selected), the bot fetches and displays the available Genie Spaces.
 
+```mermaid
+sequenceDiagram
+    actor User as Teams User
+    participant Bot as Teams Genie Bot
+    participant Auth as Databricks OAuth
+    participant DB as Database
+    participant Genie as Genie API
+
+    User->>Bot: "list genie spaces"
+    Bot->>DB: Check for User Token
+    DB-->>Bot: No Token Found
+    Bot-->>User: Sends Login Adaptive Card
+    User->>Auth: Authenticates via Browser
+    Auth-->>Bot: OAuth Callback with Tokens
+    Bot->>DB: Encrypt & Save Tokens
+    
+    opt Account-Level Auth Enabled
+        Bot->>Genie: Fetch Available Workspaces
+        Genie-->>Bot: List of Workspaces
+        Bot-->>User: Workspace Selection Card
+        User->>Bot: Selects Workspace
+        Bot->>DB: Save Workspace Preference
+    end
+    
+    Bot->>Genie: Fetch Genie Spaces
+    Genie-->>Bot: List of Spaces
+    Bot-->>User: Sends Genie Spaces Adaptive Card
+```
+
 ### Scenario 2: Entra ID Security Group Scoping (Machine-to-Machine / M2M)
 *(Triggered if global `DATABRICKS_TOKEN`, global `DATABRICKS_CLIENT_ID`, and U2M OAuth are NOT configured)*
 1. **Group Resolution**: The bot queries Microsoft Graph API to find the user's Azure AD group memberships.
@@ -197,9 +226,46 @@ The interaction flow depends on how the bot's authentication is configured. When
    - If the user belongs to only *one* mapped group, it silently defaults to that scope.
 3. **Listing Spaces**: The bot uses the M2M Service Principal tied to the selected scope to fetch the Genie Spaces.
 
+```mermaid
+sequenceDiagram
+    actor User as Teams User
+    participant Bot as Teams Genie Bot
+    participant Graph as MS Graph API
+    participant DB as Database
+    participant Genie as Genie API
+
+    User->>Bot: "list genie spaces"
+    Bot->>Graph: Fetch User's Azure AD Groups
+    Graph-->>Bot: Returns List of Group Object IDs
+    Bot->>DB: Match Group IDs to M2M Scopes
+    
+    alt Multiple Scopes Found
+        Bot-->>User: Sends Scope Selection Card
+        User->>Bot: Selects Scope
+        Bot->>DB: Save Scope Preference
+    end
+    
+    Bot->>Genie: Fetch Spaces (using matched M2M token)
+    Genie-->>Bot: List of Spaces
+    Bot-->>User: Sends Genie Spaces Adaptive Card
+```
+
 ### Scenario 3: Global Authentication
 *(Triggered if `DATABRICKS_TOKEN` or global M2M client ID/secret is configured and no advanced auth is set)*
 1. **Listing Spaces**: The bot skips all user prompts and immediately fetches the Genie Spaces using the globally configured service principal or PAT.
+
+```mermaid
+sequenceDiagram
+    actor User as Teams User
+    participant Bot as Teams Genie Bot
+    participant Genie as Genie API
+
+    User->>Bot: "list genie spaces"
+    Note over Bot, Genie: Uses global token/M2M credentials
+    Bot->>Genie: Fetch Spaces
+    Genie-->>Bot: List of Spaces
+    Bot-->>User: Sends Genie Spaces Adaptive Card
+```
 
 ---
 
