@@ -73,10 +73,6 @@ async def test_process_message_list_spaces(
         turn_context=mock_turn_context,
         user_id="user_123",
         workspace_host=None,
-        token="test-token",
-        client_id=None,
-        client_secret=None,
-        scope_name=None,
     )
     mock_turn_context.send_activity.assert_any_call("list response")
 

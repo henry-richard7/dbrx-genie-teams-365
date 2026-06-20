@@ -56,7 +56,7 @@ class MessageHandler:
         self.genie_list_handler = GenieListHandler(
             database, user_state, conversation_state
         )
-        self.file_card_handler = FileCardHandler()
+        self.file_card_handler = FileCardHandler(storage=self.user_state._storage if self.user_state else None)
         self.llm_summarizer = LlmSummarizer()
         self.chart_card_generator = AdaptiveCardChartGenerator()
 
@@ -782,21 +782,26 @@ class MessageHandler:
         finally:
             end_time = datetime.now(timezone.utc)
             try:
-                await self.database.add_query_log(
-                    user_id=user_id,
-                    question=question,
-                    user_name=user_name,
-                    user_email=user_email,
-                    scope_name=scope_name,
-                    workspace_host=getattr(user_selection, "workspace_host", None),
-                    space_name=user_selection.space_name,
-                    space_id=user_selection.space_id,
-                    conversation_id=user_selection.conversation_id,
-                    sql_query=sql_query,
-                    start_time=start_time,
-                    end_time=end_time,
-                    exception=exception_str,
-                )
+                # If U2M is used, we don't need to log locally because Databricks Query History logs the user's identity natively.
+                is_u2m = bool(creds_kwargs.get("token"))
+                if not is_u2m:
+                    await self.database.add_query_log(
+                        user_id=user_id,
+                        question=question,
+                        user_name=user_name,
+                        user_email=user_email,
+                        scope_name=scope_name,
+                        workspace_host=getattr(user_selection, "workspace_host", None),
+                        space_name=user_selection.space_name,
+                        space_id=user_selection.space_id,
+                        conversation_id=user_selection.conversation_id,
+                        sql_query=sql_query,
+                        start_time=start_time,
+                        end_time=end_time,
+                        exception=exception_str,
+                    )
+                else:
+                    logger.debug("Skipping GenieAuditLog insertion because U2M OAuth natively logs user identity in Databricks.")
             except Exception as db_err:
                 logger.error(f"Failed to save query log: {db_err}", exc_info=True)
 

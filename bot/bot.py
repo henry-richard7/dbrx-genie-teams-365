@@ -43,7 +43,7 @@ class TeamsGenieBot(TeamsActivityHandler):
         self.conversation_state = conversation_state
         self.database = Database()
         self.message_handler = MessageHandler(self.database, self.user_state, self.conversation_state)
-        self.file_card_handler = FileCardHandler()
+        self.file_card_handler = FileCardHandler(storage=self.user_state._storage if self.user_state else None)
         self.user_group = UserGroup()
         self.session = None
 
@@ -124,7 +124,13 @@ class TeamsGenieBot(TeamsActivityHandler):
         file_name = context.get("filename", "unknown")
         file_id = context.get("file_id")
 
-        if not file_id or file_id not in FileCardHandler._pending_files:
+        if not file_id:
+            logger.error("File accept received but file_id is missing.")
+            await self.file_card_handler._file_upload_failed(turn_context, "File data not found.")
+            return
+
+        file_bytes = await self.file_card_handler._get_and_delete_file_bytes(file_id)
+        if not file_bytes:
             logger.error(
                 f"File accept received but file_id '{file_id}' not found in cache."
             )
@@ -134,9 +140,6 @@ class TeamsGenieBot(TeamsActivityHandler):
             )
             return
 
-        # Retrieve and immediately evict the cached bytes to free memory
-        file_data = FileCardHandler._pending_files.pop(file_id)
-        file_bytes = file_data['bytes'] if isinstance(file_data, dict) else file_data
         file_size = len(file_bytes)
         logger.debug(f"Retrieved {file_size} bytes for file '{file_name}' from cache.")
 
@@ -198,7 +201,7 @@ class TeamsGenieBot(TeamsActivityHandler):
 
         # Free cached bytes so they don't linger in memory indefinitely
         if file_id:
-            FileCardHandler._pending_files.pop(file_id, None)
+            await self.file_card_handler._delete_file_bytes(file_id)
             logger.debug(f"Evicted cached bytes for file_id '{file_id}' on decline.")
 
         logger.debug(f"User declined upload for file: {file_name}")

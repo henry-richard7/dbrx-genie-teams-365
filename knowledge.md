@@ -94,13 +94,21 @@ Because Microsoft Teams is a stateless conversational interface, the bot must re
 
 ### 4.2 Auditing & Telemetry
 In an enterprise environment, it is critical to maintain a history of what data was accessed, by whom, and what queries were executed. The bot handles this through the `GenieAuditLog` table.
-* **Comprehensive Logging:** Every time a user executes a natural language query against a Genie Space, a new record is asynchronously inserted into the `genie_audit_logs` table.
-* **Context Capture:** The log captures the user's `user_id` (AAD Object ID), the `conversation_id`, the `space_id` that was queried, and the `user_group_id` (the active scope/role).
+* **Comprehensive Logging:** Every time a user executes a natural language query against a Genie Space using M2M or Global Auth, a new record is asynchronously inserted into the `genie_audit_logs` table.
+* **U2M Bypass:** If the user is authenticated via Interactive Custom OAuth (U2M), the bot *bypasses* the local `GenieAuditLog` insertion. This is because Databricks natively logs the executed SQL queries under the user's actual human identity in the Databricks Query History, making redundant local logging unnecessary.
+* **Context Capture:** For M2M queries, the log captures the user's `user_id` (AAD Object ID), the `conversation_id`, the `space_id` that was queried, and the `user_group_id` (the active scope/role).
 * **Query Details:** It records both the original natural language question asked by the user and the actual, generated Databricks SQL that was executed against the database.
-* **Performance & Error Tracking:** The table logs the `execution_time_ms` (how long Databricks took to respond) and the `status` (e.g., SUCCESS, ERROR). If an error occurs, the exception message is also captured.
-* **Value:** This data allows administrators to monitor usage patterns, identify slow or failing queries, ensure users are not attempting unauthorized access, and track exactly how AI models are interpreting user prompts into SQL.
+*   **Performance & Error Tracking:** The table logs the `execution_time_ms` (how long Databricks took to respond) and the `status` (e.g., SUCCESS, ERROR). If an error occurs, the exception message is also captured.
+*   **Value:** This data allows administrators to monitor usage patterns, identify slow or failing queries, ensure users are not attempting unauthorized access, and track exactly how AI models are interpreting user prompts into SQL.
 
-### 5.1 Multi-Scope Authentication Explained
+### 4.3 Distributed File Caching (Excel Exports)
+To bypass Microsoft Teams Adaptive Card size limits and ensure performance, large Databricks SQL responses (>100 rows) are converted into downloadable `.xlsx` Excel files. This requires a secure, two-step file consent flow with the user.
+*   **Storage Injection:** To prevent Out-Of-Memory (OOM) crashes on large payloads in multi-pod deployments, the bot does not keep these large byte buffers in local Python dictionary memory. Instead, the `FileCardHandler` injects the native Bot Framework `Storage` provider (such as the custom `S3Storage` backend).
+*   **Base64 Offloading:** When a large query completes, the raw Excel bytes are `base64` encoded and written entirely to the configured distributed storage (e.g., AWS S3, MinIO) mapped to a unique `file_<id>` key.
+*   **Just-In-Time Delivery & Cleanup:** When the user clicks "Accept" on the Teams file consent card, the bot securely retrieves the `base64` string from S3, decodes it, uploads it to OneDrive/SharePoint via the Bot Framework API, and immediately deletes the payload from S3 to ensure no stale data remains persisted.
+*   **Fallback:** If `USE_CONTEXT` is disabled, it safely falls back to storing the bytes locally in a class-level dictionary (`FileCardHandler._pending_files`).
+
+## 5. Multi-Scope Authentication Explained
 The bot is designed to serve as a centralized interface for multiple enterprise teams (e.g., HR, Finance, Engineering), each with its own distinct Databricks environments and strict data access privileges. To securely enforce these data boundaries, the bot employs a **Multi-Scope Authentication** model. 
 
 Here is the detailed breakdown of the mechanism:

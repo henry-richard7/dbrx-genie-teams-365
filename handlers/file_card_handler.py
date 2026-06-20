@@ -8,6 +8,8 @@ import logging
 from datetime import datetime
 from io import BytesIO
 from uuid import uuid4
+import base64
+import time
 
 from microsoft_agents.hosting.core import TurnContext
 from microsoft_agents.activity import (
@@ -40,6 +42,14 @@ class FileCardHandler:
     _pending_files: dict = {}
     _FILE_TTL_SECONDS = 3600  # 1 hour
 
+    def __init__(self, storage=None):
+        """Initializes the FileCardHandler.
+        
+        Args:
+            storage: The Bot Framework Storage instance (e.g. S3Storage) used for distributed caching.
+        """
+        self.storage = storage
+
     @classmethod
     def _cleanup_expired_files(cls):
         """Cleans up expired file data from the class-level cache.
@@ -55,6 +65,46 @@ class FileCardHandler:
         ]
         for k in expired_keys:
             del cls._pending_files[k]
+
+    async def _save_file_bytes(self, file_id: str, file_bytes: bytes):
+        """Saves file bytes either to Bot Framework Storage (if available) or to memory cache."""
+        if self.storage:
+            encoded = base64.b64encode(file_bytes).decode('utf-8')
+            await self.storage.write({
+                f"file_{file_id}": {
+                    'bytes': encoded,
+                    'timestamp': time.time()
+                }
+            })
+        else:
+            self._cleanup_expired_files()
+            FileCardHandler._pending_files[file_id] = {
+                'bytes': file_bytes,
+                'timestamp': time.time()
+            }
+
+    async def _get_and_delete_file_bytes(self, file_id: str) -> bytes | None:
+        """Retrieves file bytes from storage/cache and immediately deletes them to free memory."""
+        if self.storage:
+            data = await self.storage.read([f"file_{file_id}"])
+            if f"file_{file_id}" in data:
+                file_data = data[f"file_{file_id}"]
+                encoded = file_data.get('bytes')
+                await self.storage.delete([f"file_{file_id}"])
+                return base64.b64decode(encoded) if encoded else None
+            return None
+        else:
+            file_data = FileCardHandler._pending_files.pop(file_id, None)
+            if file_data:
+                return file_data['bytes'] if isinstance(file_data, dict) else file_data
+            return None
+
+    async def _delete_file_bytes(self, file_id: str):
+        """Deletes file bytes from storage/cache."""
+        if self.storage:
+            await self.storage.delete([f"file_{file_id}"])
+        else:
+            FileCardHandler._pending_files.pop(file_id, None)
 
     async def _file_upload_failed(self, turn_context: TurnContext, error: str):
         """Sends an error message to the user if a file upload fails.
@@ -125,12 +175,9 @@ class FileCardHandler:
         """
         import time
         file_id = str(uuid4())
-        self._cleanup_expired_files()
+        
         # Cache raw bytes — retrieved on accept, discarded on accept/decline
-        FileCardHandler._pending_files[file_id] = {
-            'bytes': file_bytes.getvalue(),
-            'timestamp': time.time()
-        }
+        await self._save_file_bytes(file_id, file_bytes.getvalue())
 
         # Lightweight context — only a UUID reference, no encoded payload
         consent_context = {"filename": filename, "file_id": file_id}
