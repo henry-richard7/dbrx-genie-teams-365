@@ -20,7 +20,7 @@ async def memory_db():
 @pytest.mark.asyncio
 async def test_add_and_get_user_selection(memory_db: Database):
     # Act
-    await memory_db.add_user_selection("user123", "space1", "My Space", "conv1")
+    await memory_db.add_user_selection("user123", "space1", "My Space", "workspace.test", "conv1")
     selection = await memory_db.get_user_selection("user123")
 
     # Assert
@@ -28,16 +28,17 @@ async def test_add_and_get_user_selection(memory_db: Database):
     assert selection.user_id == "user123"
     assert selection.space_id == "space1"
     assert selection.space_name == "My Space"
+    assert selection.workspace_host == "workspace.test"
     assert selection.conversation_id == "conv1"
 
 
 @pytest.mark.asyncio
 async def test_update_user_selection(memory_db: Database):
     # Arrange
-    await memory_db.add_user_selection("user123", "space1", "My Space", "conv1")
+    await memory_db.add_user_selection("user123", "space1", "My Space", "workspace.test", "conv1")
 
     # Act
-    await memory_db.update_user_selection("user123", "space2", "New Space", "conv2")
+    await memory_db.update_user_selection("user123", "space2", "New Space", "workspace.test", "conv2")
     selection = await memory_db.get_user_selection("user123")
 
     # Assert

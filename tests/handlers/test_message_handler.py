@@ -8,7 +8,7 @@ from database.db_models import UserSelection
 @pytest.fixture
 def mock_database():
     db = MagicMock()
-    db.get_user_selection = AsyncMock()
+    db.get_user_selection = AsyncMock(return_value=None)
     db.update_user_selection = AsyncMock()
     db.update_user_scope = AsyncMock()
     db.clear_user_space_mappings = AsyncMock()
@@ -70,7 +70,9 @@ async def test_process_message_list_spaces(
 
     # Assert
     message_handler.genie_list_handler.handle_list_spaces.assert_called_once_with(
-        user_id="user_123"
+        turn_context=mock_turn_context,
+        user_id="user_123",
+        workspace_host=None,
     )
     mock_turn_context.send_activity.assert_any_call("list response")
 
@@ -148,6 +150,7 @@ async def test_handle_space_selection(mock_database, mock_turn_context):
             user_id="user_123",
             space_id="s1",
             space_name="Space 1",
+            workspace_host=None,
             conversation_id=None,
         )
         mock_turn_context.send_activity.assert_called_once_with(

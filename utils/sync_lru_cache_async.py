@@ -7,8 +7,9 @@ such as fetching available Genie spaces from Databricks.
 import time
 from functools import wraps
 
+from typing import Callable
 
-def sync_lru_cache_async(maxsize=128):
+def sync_lru_cache_async(maxsize=128) -> Callable:
     """An asynchronous Least Recently Used (LRU) cache decorator.
 
     Caches the results of asynchronous function calls based on arguments.

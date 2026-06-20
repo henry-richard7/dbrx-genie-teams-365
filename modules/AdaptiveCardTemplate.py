@@ -1,3 +1,10 @@
+"""
+Adaptive Card Templating Module.
+
+This module provides the AdaptiveCardTemplate class which is a factory for dynamically
+constructing Microsoft Teams Adaptive Card JSON payloads to render rich UIs.
+"""
+
 class AdaptiveCardTemplate:
     """A utility class for dynamically constructing Microsoft Teams Adaptive Cards.
 
@@ -34,6 +41,35 @@ class AdaptiveCardTemplate:
                 numeric_columns.append(col["position"])
 
         return id_columns, string_columns, numeric_columns, column_map
+
+    def _get_default_xy_columns(
+        self,
+        id_columns: list[int],
+        string_columns: list[int],
+        numeric_columns: list[int],
+        column_map: dict[int, str]
+    ) -> tuple[str | None, str | None, int | None, int | None]:
+        """Helper to find default X (string) and Y (numeric) columns."""
+        x_column_name = None
+        y_column_name = None
+        x_column_pos = None
+        y_column_pos = None
+
+        # Get string column (x) - use first non-ID string column
+        for pos in string_columns:
+            if pos not in id_columns:
+                x_column_name = column_map[pos]
+                x_column_pos = pos
+                break
+
+        # Get numeric column (y) - use first non-ID numeric column
+        for pos in numeric_columns:
+            if pos not in id_columns:
+                y_column_name = column_map[pos]
+                y_column_pos = pos
+                break
+
+        return x_column_name, y_column_name, x_column_pos, y_column_pos
 
     def add_text(
         self,
@@ -177,25 +213,9 @@ class AdaptiveCardTemplate:
             self._classify_columns(columns)
         )
 
-        # Find x and y column names
-        x_column_name = None
-        y_column_name = None
-        x_column_pos = None
-        y_column_pos = None
-
-        # Get string column (x) - use first non-ID string column
-        for pos in string_columns:
-            if pos not in id_columns:
-                x_column_name = column_map[pos]
-                x_column_pos = pos
-                break
-
-        # Get numeric column (y) - use first non-ID numeric column
-        for pos in numeric_columns:
-            if pos not in id_columns:
-                y_column_name = column_map[pos]
-                y_column_pos = pos
-                break
+        x_column_name, y_column_name, x_column_pos, y_column_pos = (
+            self._get_default_xy_columns(id_columns, string_columns, numeric_columns, column_map)
+        )
 
         # Process each row
         data_rows = []
@@ -233,25 +253,9 @@ class AdaptiveCardTemplate:
             self._classify_columns(columns)
         )
 
-        # Find x and y column names
-        x_column_name = None
-        y_column_name = None
-        x_column_pos = None
-        y_column_pos = None
-
-        # Get string column (x) - use first non-ID string column
-        for pos in string_columns:
-            if pos not in id_columns:
-                x_column_name = column_map[pos]
-                x_column_pos = pos
-                break
-
-        # Get numeric column (y) - use first non-ID numeric column
-        for pos in numeric_columns:
-            if pos not in id_columns:
-                y_column_name = column_map[pos]
-                y_column_pos = pos
-                break
+        x_column_name, y_column_name, x_column_pos, y_column_pos = (
+            self._get_default_xy_columns(id_columns, string_columns, numeric_columns, column_map)
+        )
 
         # Process each row
         data_rows = []

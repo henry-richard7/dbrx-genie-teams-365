@@ -1,3 +1,9 @@
+"""
+Databricks Genie API Integration Module.
+
+This module provides the Genie class, a wrapper around the Databricks SDK to 
+handle text-to-SQL generation via the Genie API.
+"""
 from typing import Dict, List, Optional, Tuple, Any
 import asyncio
 from os import environ
@@ -8,11 +14,14 @@ from databricks.sdk.service.dashboards import GenieAPI
 from dotenv import load_dotenv
 
 
-from utils.sync_lru_cache_async import sync_lru_cache_async
+
 
 load_dotenv()
 
 logger = logging.getLogger(__name__)
+
+# Global cache for Genie Spaces to reduce Databricks API calls
+_SPACES_CACHE = {}
 
 
 class Genie:
@@ -26,15 +35,17 @@ class Genie:
         genie_api (GenieAPI): The Databricks Genie API client.
     """
 
-    def __init__(self, client_id: str = None, client_secret: str = None):
+    def __init__(self, client_id: str = None, client_secret: str = None, token: str = None, workspace_host: str = None):
         """Initializes the Genie wrapper.
 
         Args:
             client_id (str, optional): Overrides the default OAuth client ID.
             client_secret (str, optional): Overrides the default OAuth client secret.
+            token (str, optional): User-specific OAuth access token.
+            workspace_host (str, optional): The specific workspace host URL.
         """
-        self._databricks_host = environ.get("DATABRICKS_HOST")
-        self._databricks_token = environ.get("DATABRICKS_TOKEN")
+        self._databricks_host = workspace_host or environ.get("DATABRICKS_HOST")
+        self._databricks_token = token or environ.get("DATABRICKS_TOKEN")
         self._genie_api = None
         self._workspace_client = None
         self._client_id = client_id or environ.get("DATABRICKS_CLIENT_ID")
@@ -231,21 +242,27 @@ class Genie:
                 }
         return {}
 
-    @sync_lru_cache_async(maxsize=1)
     async def get_spaces(self) -> List[Any]:
         """Retrieves a list of all accessible Genie spaces.
 
-        This method is cached to prevent redundant API calls across multiple interactions.
+        This method uses a global memory cache keyed by credentials 
+        to prevent redundant API calls across multiple user interactions.
 
         Returns:
             List[Any]: A list of available Genie space objects.
         """
+        cache_key = (self._client_id, self._databricks_host, self._databricks_token)
+        if cache_key in _SPACES_CACHE:
+            return _SPACES_CACHE[cache_key]
+
         try:
             loop = asyncio.get_running_loop()
             spaces_response = await loop.run_in_executor(
                 None, self.genie_api.list_spaces
             )
-            return spaces_response.spaces or []
+            spaces = spaces_response.spaces or []
+            _SPACES_CACHE[cache_key] = spaces
+            return spaces
         except Exception as e:
             logger.error(f"Error getting spaces: {str(e)}", exc_info=True)
             return []

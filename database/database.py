@@ -1,5 +1,11 @@
+"""
+Database module for managing connections and operations.
+
+This module provides the Database class which wraps SQLAlchemy and SQLModel
+to interact with the SQLite or PostgreSQL database asynchronously.
+"""
 import os
-from .db_models import UserSelection, GenieSpace, SecurityGroupMapping, GenieAuditLog
+from .db_models import UserSelection, GenieSpace, SecurityGroupMapping, GenieAuditLog, UserToken
 from sqlmodel import select, delete, SQLModel
 from sqlalchemy.ext.asyncio import create_async_engine
 from sqlmodel.ext.asyncio.session import AsyncSession
@@ -7,8 +13,12 @@ from typing import List, Optional
 from datetime import datetime
 import logging
 
-logger = logging.getLogger(__name__)
+import logging
+from utils.encryption import TokenEncryptor
+from config import DefaultConfig
 
+logger = logging.getLogger(__name__)
+CONFIG = DefaultConfig()
 
 class Database:
     """A wrapper class for SQLite database interactions using SQLModel and async SQLAlchemy.
@@ -28,7 +38,17 @@ class Database:
                 "DATABASE_URL", "sqlite+aiosqlite:///teams_genie_bot.db"
             )
         logger.debug(f"Initializing Database with URL: {db_url}")
-        self.engine = create_async_engine(db_url)
+        
+        engine_kwargs = {}
+        if "postgresql" in db_url:
+            engine_kwargs = {
+                "pool_size": 20,
+                "max_overflow": 10,
+                "pool_pre_ping": True,
+            }
+        
+        self.engine = create_async_engine(db_url, **engine_kwargs)
+        self.encryptor = TokenEncryptor(CONFIG.TOKEN_ENCRYPTION_KEY)
 
     async def create_tables(self):
         """Creates all database tables defined by SQLModel if they do not exist."""
@@ -129,20 +149,16 @@ class Database:
         """
         logger.debug(f"Clearing all active space mappings for user: {user_id}")
         async with AsyncSession(self.engine) as session:
-            # Count first so we can report how many were deleted
-            count_stmt = select(GenieSpace).where(GenieSpace.user_id == user_id)
-            count_result = await session.exec(count_stmt)
-            count = len(count_result.all())
-
             # Single bulk DELETE — eliminates N individual round-trips
             delete_stmt = delete(GenieSpace).where(GenieSpace.user_id == user_id)
-            await session.exec(delete_stmt)
+            result = await session.exec(delete_stmt)
             await session.commit()
+            count = result.rowcount
             logger.info(f"Cleared {count} space mappings for user {user_id}")
             return count
 
     async def add_user_selection(
-        self, user_id: str, space_id: str, space_name: str, conversation_id: str
+        self, user_id: str, space_id: str, space_name: str, workspace_host: str, conversation_id: str
     ) -> UserSelection:
         """Adds a new active user selection for a Genie Space.
 
@@ -150,6 +166,7 @@ class Database:
             user_id (str): The Microsoft Teams user ID.
             space_id (str): The selected Genie Space ID.
             space_name (str): The selected Genie Space name.
+            workspace_host (str): The Databricks workspace host.
             conversation_id (str): The active conversation ID for context.
 
         Returns:
@@ -163,6 +180,7 @@ class Database:
                 user_id=user_id,
                 space_id=space_id,
                 space_name=space_name,
+                workspace_host=workspace_host,
                 conversation_id=conversation_id,
             )
             session.add(selection)
@@ -224,7 +242,7 @@ class Database:
             return selection
 
     async def update_user_selection(
-        self, user_id: str, space_id: str, space_name: str, conversation_id: str
+        self, user_id: str, space_id: str, space_name: str, workspace_host: str, conversation_id: str
     ) -> UserSelection:
         """Updates an existing user selection, or creates one if it doesn't exist.
 
@@ -232,6 +250,7 @@ class Database:
             user_id (str): The Microsoft Teams user ID.
             space_id (str): The new Genie Space ID.
             space_name (str): The new Genie Space name.
+            workspace_host (str): The new Workspace host.
             conversation_id (str): The new conversation ID.
 
         Returns:
@@ -248,6 +267,7 @@ class Database:
                 logger.debug(f"Modifying existing selection row for user {user_id}")
                 selection.space_id = space_id
                 selection.space_name = space_name
+                selection.workspace_host = workspace_host
                 selection.conversation_id = conversation_id
             else:
                 logger.debug(
@@ -257,6 +277,7 @@ class Database:
                     user_id=user_id,
                     space_id=space_id,
                     space_name=space_name,
+                    workspace_host=workspace_host,
                     conversation_id=conversation_id,
                 )
 
@@ -318,6 +339,7 @@ class Database:
         user_name: Optional[str] = None,
         user_email: Optional[str] = None,
         scope_name: Optional[str] = None,
+        workspace_host: Optional[str] = None,
         space_name: Optional[str] = None,
         space_id: Optional[str] = None,
         conversation_id: Optional[str] = None,
@@ -334,6 +356,7 @@ class Database:
             user_name (str, optional): The name of the user.
             user_email (str, optional): The email of the user.
             scope_name (str, optional): The scope/security group name.
+            workspace_host (str, optional): The selected workspace host.
             space_name (str, optional): The name of the Genie space.
             space_id (str, optional): The ID of the Genie space.
             conversation_id (str, optional): The ID of the Genie conversation.
@@ -353,6 +376,7 @@ class Database:
                 user_name=user_name,
                 user_email=user_email,
                 scope_name=scope_name,
+                workspace_host=workspace_host,
                 space_name=space_name,
                 space_id=space_id,
                 conversation_id=conversation_id,
@@ -366,3 +390,81 @@ class Database:
             await session.refresh(log_entry)
             logger.info(f"Successfully logged query for user {user_id}")
             return log_entry
+
+    async def get_user_token(self, user_id: str) -> UserToken | None:
+        """Retrieves the OAuth token for a user.
+
+        Args:
+            user_id (str): The Microsoft Teams user ID.
+
+        Returns:
+            UserToken | None: The user's token, or None if not found.
+        """
+        logger.debug(f"Fetching user token for: {user_id}")
+        async with AsyncSession(self.engine) as session:
+            statement = select(UserToken).where(UserToken.user_id == user_id)
+            result = await session.exec(statement)
+            token = result.first()
+            if token:
+                token.access_token = self.encryptor.decrypt(token.access_token)
+                if token.refresh_token:
+                    token.refresh_token = self.encryptor.decrypt(token.refresh_token)
+            return token
+
+    async def save_user_token(self, user_id: str, access_token: str, refresh_token: str | None = None, expires_at: datetime | None = None) -> UserToken:
+        """Saves or updates the OAuth token for a user.
+
+        Args:
+            user_id (str): The Microsoft Teams user ID.
+            access_token (str): The OAuth access token.
+            refresh_token (str | None): The OAuth refresh token.
+            expires_at (datetime | None): Expiration time of the token.
+
+        Returns:
+            UserToken: The saved token record.
+        """
+        logger.debug(f"Saving user token for: {user_id}")
+        async with AsyncSession(self.engine) as session:
+            statement = select(UserToken).where(UserToken.user_id == user_id)
+            result = await session.exec(statement)
+            token = result.first()
+            
+            enc_access_token = self.encryptor.encrypt(access_token)
+            enc_refresh_token = self.encryptor.encrypt(refresh_token) if refresh_token else None
+
+            if token:
+                token.access_token = enc_access_token
+                token.refresh_token = enc_refresh_token
+                token.expires_at = expires_at
+            else:
+                token = UserToken(
+                    user_id=user_id,
+                    access_token=enc_access_token,
+                    refresh_token=enc_refresh_token,
+                    expires_at=expires_at
+                )
+            session.add(token)
+            await session.commit()
+            await session.refresh(token)
+            return token
+
+    async def delete_user_token(self, user_id: str) -> bool:
+        """Deletes the OAuth token for a user.
+
+        Args:
+            user_id (str): The Microsoft Teams user ID.
+
+        Returns:
+            bool: True if deleted, False if not found.
+        """
+        logger.debug(f"Deleting user token for: {user_id}")
+        async with AsyncSession(self.engine) as session:
+            statement = select(UserToken).where(UserToken.user_id == user_id)
+            result = await session.exec(statement)
+            token = result.first()
+            if token:
+                await session.delete(token)
+                await session.commit()
+                return True
+            return False
+

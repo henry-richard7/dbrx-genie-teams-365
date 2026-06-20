@@ -1,3 +1,9 @@
+"""
+User group lookup module.
+
+Provides the UserGroup utility class to resolve a user's Entra ID (Azure AD)
+transitive security group memberships using the Microsoft Graph API.
+"""
 import aiohttp
 from dotenv import load_dotenv
 from os import environ
@@ -13,15 +19,22 @@ class UserGroup:
     """
 
     def __init__(self):
+        """Initializes the UserGroup instance and its aiohttp session."""
         self._session = None
 
     @property
     def session(self) -> aiohttp.ClientSession:
+        """Lazy initialization of the aiohttp ClientSession.
+        
+        Returns:
+            aiohttp.ClientSession: The active HTTP session.
+        """
         if self._session is None or self._session.closed:
             self._session = aiohttp.ClientSession()
         return self._session
 
     async def close(self):
+        """Closes the underlying aiohttp ClientSession if it is open."""
         if self._session and not self._session.closed:
             await self._session.close()
 
