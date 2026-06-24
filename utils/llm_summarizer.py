@@ -117,6 +117,9 @@ class LlmSummarizer(BaseLLMClient):
         # Request completion
         try:
             response = model.invoke(formatted_prompt)
+            if hasattr(response, "response_metadata") and "token_usage" in response.response_metadata:
+                usage = response.response_metadata["token_usage"]
+                logger.info(f"LlmSummarizer Token Usage - Input: {usage.get('prompt_tokens', 0)}, Output: {usage.get('completion_tokens', 0)}")
         except Exception as e:
             logger.warning(f"LLM API failed or rate limit reached: {e}")
             return {

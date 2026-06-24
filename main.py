@@ -171,9 +171,11 @@ class ExemptJwtMiddleware:
             receive (Receive): The ASGI receive callable.
             send (Send): The ASGI send callable.
         """
-        if scope["type"] == "http" and scope["path"].startswith("/api/oauth"):
-            await self.app(scope, receive, send)
-            return
+        if scope["type"] == "http":
+            path = scope["path"]
+            if path.startswith("/api/oauth") or path.startswith("/api/charts"):
+                await self.app(scope, receive, send)
+                return
         await self.jwt_middleware(scope, receive, send)
 
 
@@ -196,6 +198,13 @@ async def messages(req: Request) -> Response:
     Returns:
         Response: The HTTP response from the Bot Framework adapter.
     """
+    import os
+    if not os.environ.get("HOST_URL"):
+        scheme = req.headers.get("x-forwarded-proto", "https")
+        host = req.headers.get("host")
+        if host:
+            os.environ["HOST_URL"] = f"{scheme}://{host}"
+            
     return await start_agent_process(
         req,
         AGENT,
@@ -369,6 +378,37 @@ async def oauth_callback(
     except Exception as e:
         logging.error(f"Error in OAuth callback: {e}", exc_info=True)
         return _modern_html_response("Login Failed", f"There was an error completing your authentication: {str(e)}<br>Please try again.", is_success=False)
+
+
+@app.get("/api/charts/{chart_id}", response_class=HTMLResponse)
+async def get_chart_html(chart_id: str) -> HTMLResponse:
+    """
+    Serves the generated Chart.js popup HTML for a specific chart ID.
+    """
+    try:
+        config_json = None
+        if CONFIG.USE_CONTEXT and STORAGE:
+            data = await STORAGE.read([chart_id])
+            if chart_id in data and "config_json" in data[chart_id]:
+                config_json = data[chart_id]["config_json"]
+                
+        if not config_json:
+            chart_config_obj = await AGENT.database.get_chart_config(chart_id)
+            if chart_config_obj:
+                config_json = chart_config_obj.config_json
+
+        if not config_json:
+            return HTMLResponse(content="<html><body><h2>Chart not found or expired.</h2></body></html>", status_code=404)
+        
+        template_path = Path(__file__).parent / "templates" / "chart_popup.html"
+        html_template = template_path.read_text(encoding="utf-8")
+        
+        # Simple string replacement for the config
+        html_content = html_template.replace("{{ config_json | safe }}", config_json)
+        return HTMLResponse(content=html_content)
+    except Exception as e:
+        logging.error(f"Error fetching chart html: {e}", exc_info=True)
+        return HTMLResponse(content="<html><body><h2>Error loading chart.</h2></body></html>", status_code=500)
 
 
 if __name__ == "__main__":

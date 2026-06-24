@@ -11,6 +11,12 @@ import aiohttp
 
 from microsoft_agents.hosting.core import TurnContext
 from microsoft_agents.hosting.teams import TeamsActivityHandler, TeamsInfo
+from microsoft_agents.activity.teams import (
+    TaskModuleResponse,
+    TaskModuleTaskInfo,
+    TaskModuleContinueResponse,
+    TaskModuleRequest
+)
 from microsoft_agents.activity import (
     ChannelAccount,
 )
@@ -77,6 +83,31 @@ class TeamsGenieBot(TeamsActivityHandler):
             if member.id != turn_context.activity.recipient.id:
                 logger.debug(f"Sending welcome message to new member: {member.id}")
                 await turn_context.send_activity("Welcome to Databricks Genie Bot!")
+
+    async def on_teams_task_module_fetch(
+        self, turn_context: TurnContext, task_module_request: TaskModuleRequest
+    ) -> TaskModuleResponse:
+        """Handles Task Module fetch events (e.g. clicking 'View Chart' button)."""
+        action_data = task_module_request.data or {}
+        action = action_data.get("action")
+        
+        if action == "fetch_chart":
+            chart_id = action_data.get("chart_id")
+            host_url = environ.get("HOST_URL", "").rstrip("/")
+            url = f"{host_url}/api/charts/{chart_id}"
+            
+            task_info = TaskModuleTaskInfo(
+                title="Chart",
+                height=10000,
+                width=10000,
+                url=url,
+                fallback_url=url,
+            )
+            return TaskModuleResponse(
+                task=TaskModuleContinueResponse(type="continue", value=task_info).model_dump()
+            )
+        
+        return await super().on_teams_task_module_fetch(turn_context, task_module_request)
 
     async def on_teams_file_consent(
         self, turn_context: TurnContext, file_consent_card_response: dict

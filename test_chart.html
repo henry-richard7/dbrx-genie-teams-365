@@ -1,0 +1,49 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Databricks Genie Chart</title>
+    <!-- Include Chart.js -->
+    <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
+    <!-- Include Microsoft Teams JS SDK to enable proper styling if desired, but mainly for closing/resizing -->
+    <script src="https://res.cdn.office.net/teams-js/2.12.0/js/MicrosoftTeams.min.js"></script>
+    <style>
+        body {
+            margin: 0;
+            padding: 20px;
+            font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif;
+            background-color: #fff;
+        }
+        .chart-container {
+            position: relative;
+            height: 80vh;
+            width: 100%;
+        }
+    </style>
+</head>
+<body>
+    <div class="chart-container">
+        <canvas id="myChart"></canvas>
+    </div>
+
+    <script>
+        // Initialize Teams SDK
+        microsoftTeams.app.initialize().then(() => {
+            console.log("Teams SDK initialized.");
+        });
+
+        // The config is injected by Jinja2 from the backend
+        const chartConfig = {"type": "bar", "data": {"labels": ["CIPLA", "AVANTIFEED", "PRICOLLTD", "CCAVENUE"], "datasets": [{"label": "Close Price", "data": [1433.1, 986.5, 575.55, 15.04], "backgroundColor": "rgba(54, 162, 235, 0.5)", "borderColor": "rgba(54, 162, 235, 1)", "borderWidth": 1}, {"label": "DMA 200", "data": [1422.8385028076173, 985.223498840332, 574.7607496643067, 15.029784930649624], "backgroundColor": "rgba(255, 99, 132, 0.5)", "borderColor": "rgba(255, 99, 132, 1)", "borderWidth": 1}]}, "options": {"responsive": true, "maintainAspectRatio": false, "plugins": {"title": {"display": true, "text": "Stock Close Price vs DMA 200 (2026-06-23)"}}}};
+        
+        document.addEventListener('DOMContentLoaded', function() {
+            const ctx = document.getElementById('myChart').getContext('2d');
+            new Chart(ctx, {
+                type: chartConfig.type,
+                data: chartConfig.data,
+                options: chartConfig.options
+            });
+        });
+    </script>
+</body>
+</html>

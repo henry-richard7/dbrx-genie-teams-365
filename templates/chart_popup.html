@@ -1,0 +1,60 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Databricks Genie Chart</title>
+    <!-- Include Chart.js -->
+    <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
+    <style>
+        body {
+            margin: 0;
+            padding: 20px;
+            font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif;
+            background-color: #fff;
+        }
+        .chart-container {
+            position: relative;
+            height: 80vh;
+            width: 100%;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+        }
+        #errorMessage {
+            color: red;
+            font-weight: bold;
+            display: none;
+        }
+    </style>
+</head>
+<body>
+    <div id="loadingMessage">Loading chart...</div>
+    <div id="errorMessage"></div>
+    <div class="chart-container">
+        <canvas id="myChart"></canvas>
+    </div>
+
+    <script>
+        document.addEventListener('DOMContentLoaded', function() {
+            document.getElementById('loadingMessage').style.display = 'none';
+            try {
+                // The config is injected from the backend
+                const chartConfig = {{ config_json | safe }};
+                
+                const ctx = document.getElementById('myChart').getContext('2d');
+                new Chart(ctx, {
+                    type: chartConfig.type,
+                    data: chartConfig.data,
+                    options: chartConfig.options
+                });
+            } catch (error) {
+                const errDiv = document.getElementById('errorMessage');
+                errDiv.style.display = 'block';
+                errDiv.innerText = "Error rendering chart: " + error.message;
+                console.error("Chart rendering error:", error);
+            }
+        });
+    </script>
+</body>
+</html>

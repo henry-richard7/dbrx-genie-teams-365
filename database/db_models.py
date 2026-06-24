@@ -80,4 +80,13 @@ class UserToken(SQLModel, table=True):
     # All other strings set to MAX size
     access_token: Optional[str] = Field(default=None, sa_column=Column(Text))
     refresh_token: Optional[str] = Field(default=None, sa_column=Column(Text))
-    expires_at: Optional[datetime] = Field(default=None)
+    expires_at: Optional[datetime] = Field(default=None)
+
+
+class ChartCache(SQLModel, table=True):
+    """Stores temporary Chart.js configurations for rendering in Task Modules."""
+    __tablename__ = "chart_cache"
+
+    id: str = Field(primary_key=True, max_length=255)
+    config_json: str = Field(sa_column=Column(Text))
+    created_at: datetime = Field(default_factory=datetime.utcnow)

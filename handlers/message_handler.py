@@ -1,9 +1,10 @@
 """
 Message routing and handling module.
 
-This module processes incoming chat messages from Teams, delegates them to the 
+This module processes incoming chat messages from Teams, delegates them to the
 Genie API or other handlers based on user action, and maintains session context.
 """
+
 import asyncio
 from datetime import datetime, timezone
 from io import BytesIO
@@ -24,7 +25,7 @@ from handlers.file_card_handler import FileCardHandler
 from database.database import Database
 from database.db_models import UserSelection
 from utils.llm_summarizer import LlmSummarizer
-from utils.chart_card_generator import AdaptiveCardChartGenerator
+from utils.chartjs_generator import ChartJsGenerator
 from utils.credential_resolver import CredentialResolver
 from utils.excel_generator import ExcelGenerator
 
@@ -35,7 +36,9 @@ logger = logging.getLogger(__name__)
 CONFIG = DefaultConfig()
 
 from utils.encryption import TokenEncryptor
+
 ENCRYPTOR = TokenEncryptor(CONFIG.TOKEN_ENCRYPTION_KEY)
+
 
 class MessageHandler:
     """Processes incoming messages from Teams and routes them to the appropriate logic.
@@ -58,12 +61,16 @@ class MessageHandler:
         self.genie_list_handler = GenieListHandler(
             database, user_state, conversation_state
         )
-        self.file_card_handler = FileCardHandler(storage=self.user_state._storage if self.user_state else None)
+        self.file_card_handler = FileCardHandler(
+            storage=self.user_state._storage if self.user_state else None
+        )
         self.llm_summarizer = LlmSummarizer()
-        self.chart_card_generator = AdaptiveCardChartGenerator()
+        self.chart_generator = ChartJsGenerator()
         self.credential_resolver = CredentialResolver(database, user_state)
 
-    async def _get_user_selection_dict(self, turn_context: TurnContext, user_id: str) -> dict:
+    async def _get_user_selection_dict(
+        self, turn_context: TurnContext, user_id: str
+    ) -> dict:
         if CONFIG.USE_CONTEXT and self.user_state:
             prop = self.user_state.create_property("UserSelectionProperty")
             return await prop.get(turn_context, {})
@@ -71,7 +78,9 @@ class MessageHandler:
             sel = await self.database.get_user_selection(user_id)
             return sel.model_dump() if sel else {}
 
-    async def _set_user_selection_dict(self, turn_context: TurnContext, user_id: str, selection_dict: dict):
+    async def _set_user_selection_dict(
+        self, turn_context: TurnContext, user_id: str, selection_dict: dict
+    ):
         if CONFIG.USE_CONTEXT and self.user_state:
             prop = self.user_state.create_property("UserSelectionProperty")
             selection_dict["user_id"] = user_id
@@ -82,26 +91,34 @@ class MessageHandler:
                 space_id=selection_dict.get("space_id", ""),
                 space_name=selection_dict.get("space_name", ""),
                 workspace_host=selection_dict.get("workspace_host"),
-                conversation_id=selection_dict.get("conversation_id")
+                conversation_id=selection_dict.get("conversation_id"),
             )
 
     async def _clear_space_cache(self, turn_context: TurnContext, user_id: str):
         """Helper to clear the cached Genie Space mappings.
-        
+
         Args:
             turn_context (TurnContext): The context object for the current turn.
             user_id (str): The Microsoft Teams user ID.
         """
         logger.debug(f"Clearing cached spaces for user {user_id}")
         if CONFIG.USE_CONTEXT and self.user_state:
-            space_mappings_prop = self.user_state.create_property("GenieSpaceMappingsProperty")
+            space_mappings_prop = self.user_state.create_property(
+                "GenieSpaceMappingsProperty"
+            )
             await space_mappings_prop.delete(turn_context)
         else:
             await self.database.clear_user_space_mappings(user_id)
 
-    async def _refresh_and_send_spaces(self, turn_context: TurnContext, user_id: str, creds_kwargs: dict, workspace_host: str = None):
+    async def _refresh_and_send_spaces(
+        self,
+        turn_context: TurnContext,
+        user_id: str,
+        creds_kwargs: dict,
+        workspace_host: str = None,
+    ):
         """Helper to fetch space list and send as activity, wrapping in typing indicator.
-        
+
         Args:
             turn_context (TurnContext): The context object for the current turn.
             user_id (str): The Microsoft Teams user ID.
@@ -152,24 +169,32 @@ class MessageHandler:
 
         elif action == "select_workspace":
             workspace_name = action_data.get("workspace_name")
-            workspace_host = action_data.get("workspace_host") or action_data.get("manual_workspace_host")
-            
+            workspace_host = action_data.get("workspace_host") or action_data.get(
+                "manual_workspace_host"
+            )
+
             if not workspace_host:
-                await turn_context.send_activity("❌ Invalid workspace host. Please try again.")
+                await turn_context.send_activity(
+                    "❌ Invalid workspace host. Please try again."
+                )
                 return
-                
-            logger.debug(f"Action 'select_workspace': {workspace_name}, host={workspace_host}")
-            
+
+            logger.debug(
+                f"Action 'select_workspace': {workspace_name}, host={workspace_host}"
+            )
+
             selection_dict = await self._get_user_selection_dict(turn_context, user_id)
             selection_dict["workspace_host"] = workspace_host
             selection_dict["space_id"] = ""
             selection_dict["space_name"] = ""
             selection_dict["conversation_id"] = ""
             await self._set_user_selection_dict(turn_context, user_id, selection_dict)
-                
+
             await turn_context.delete_activity(turn_context.activity.reply_to_id)
-            await turn_context.send_activity(f"✅ Selected workspace: **{workspace_name or workspace_host}**.")
-            
+            await turn_context.send_activity(
+                f"✅ Selected workspace: **{workspace_name or workspace_host}**."
+            )
+
             turn_context.activity.text = "list genie spaces"
             turn_context.activity.value = None
             await self.process_message(turn_context)
@@ -208,8 +233,10 @@ class MessageHandler:
             await turn_context.delete_activity(turn_context.activity.reply_to_id)
             await self._clear_space_cache(turn_context, user_id)
 
-            creds_kwargs = await self.credential_resolver.get_databricks_credentials_kwargs(
-                turn_context, send_prompt=False
+            creds_kwargs = (
+                await self.credential_resolver.get_databricks_credentials_kwargs(
+                    turn_context, send_prompt=False
+                )
             )
             if creds_kwargs is None:
                 return
@@ -217,19 +244,25 @@ class MessageHandler:
             selection_dict = await self._get_user_selection_dict(turn_context, user_id)
             workspace_host = selection_dict.get("workspace_host")
 
-            await self._refresh_and_send_spaces(turn_context, user_id, creds_kwargs, workspace_host)
+            await self._refresh_and_send_spaces(
+                turn_context, user_id, creds_kwargs, workspace_host
+            )
 
         elif action == "retry_spaces":
-            creds_kwargs = await self.credential_resolver.get_databricks_credentials_kwargs(
-                turn_context, send_prompt=False
+            creds_kwargs = (
+                await self.credential_resolver.get_databricks_credentials_kwargs(
+                    turn_context, send_prompt=False
+                )
             )
             if creds_kwargs is None:
                 return
-            
+
             selection_dict = await self._get_user_selection_dict(turn_context, user_id)
             workspace_host = selection_dict.get("workspace_host")
-                    
-            await self._refresh_and_send_spaces(turn_context, user_id, creds_kwargs, workspace_host)
+
+            await self._refresh_and_send_spaces(
+                turn_context, user_id, creds_kwargs, workspace_host
+            )
 
         elif action == "show_help":
             help_message = (
@@ -323,10 +356,15 @@ class MessageHandler:
 
             if not client_id and not client_secret and not token:
                 logger.debug("Using global Databricks credentials to initialize Genie.")
-                genie = Genie(workspace_host=getattr(user_selection, "workspace_host", None))
+                genie = Genie(
+                    workspace_host=getattr(user_selection, "workspace_host", None)
+                )
             else:
                 genie = Genie(
-                    client_id=client_id, client_secret=client_secret, token=token, workspace_host=getattr(user_selection, "workspace_host", None)
+                    client_id=client_id,
+                    client_secret=client_secret,
+                    token=token,
+                    workspace_host=getattr(user_selection, "workspace_host", None),
                 )
             sending_excel = False
 
@@ -358,9 +396,13 @@ class MessageHandler:
                 logger.debug(
                     f"Updating conversation ID for user {user_id} to {new_conversation_id}"
                 )
-                selection_dict = await self._get_user_selection_dict(turn_context, user_id)
+                selection_dict = await self._get_user_selection_dict(
+                    turn_context, user_id
+                )
                 selection_dict["conversation_id"] = new_conversation_id
-                await self._set_user_selection_dict(turn_context, user_id, selection_dict)
+                await self._set_user_selection_dict(
+                    turn_context, user_id, selection_dict
+                )
                 user_selection.conversation_id = new_conversation_id
 
             # Process response
@@ -380,7 +422,7 @@ class MessageHandler:
                 summary_card.add_text(genie_response["query_description"])
 
             table_card = None
-            chart_card = None
+            chart_config = None
 
             if "data" in genie_response and "columns" in genie_response:
                 data_dict = genie_response.get("data", {})
@@ -389,12 +431,14 @@ class MessageHandler:
 
                 data_array = data_dict.get("data_array", [])
                 row_count = data_dict.get("row_count", 0)
-                
+
                 if row_count > 0 and len(data_array) > 0:
                     # Generate summary
                     try:
                         if os.environ.get("GET_AI_INSIGHTS", "true").lower() == "true":
-                            logger.debug("Generating summary from data via llm_summarizer.")
+                            logger.debug(
+                                "Generating summary from data via llm_summarizer."
+                            )
 
                             summary_result = await asyncio.to_thread(
                                 self.llm_summarizer.summarize,
@@ -414,37 +458,80 @@ class MessageHandler:
 
                             summary_card.add_text(summary_text)
                         else:
-                            logger.debug("AI insights are disabled via GET_AI_INSIGHTS.")
+                            logger.debug(
+                                "AI insights are disabled via GET_AI_INSIGHTS."
+                            )
 
-                        # Generate chart card via dedicated LLM agent when charts are enabled
-                        if os.environ.get("ENABLE_CHARTS", "inactive").lower() == "active":
+                        # Generate chart config via dedicated LLM agent when charts are enabled
+                        if (
+                            os.environ.get("ENABLE_CHARTS", "inactive").lower()
+                            == "active"
+                        ):
                             try:
                                 logger.debug(
-                                    "Requesting chart Adaptive Card from AdaptiveCardChartGenerator."
+                                    "Requesting Chart.js config from ChartJsGenerator."
                                 )
-                                # Slice to top 15 rows for readability; LLM handles schema selection
-                                chart_data_slice = data_array[:15]
-                                chart_card = await asyncio.to_thread(
-                                    self.chart_card_generator.generate_chart_card,
+                                chart_data_slice = data_array[
+                                    :30
+                                ]  # Can allow more data since it's HTML
+                                chart_config = await asyncio.to_thread(
+                                    self.chart_generator.generate_chart_config,
                                     genie_response["columns"]["columns"],
                                     chart_data_slice,
                                     creds_kwargs.get("client_id"),
                                     creds_kwargs.get("client_secret"),
                                 )
-                                if chart_card:
-                                    logger.debug(
-                                        f"Chart card generated. Chart type: "
-                                        f"{chart_card.get('body', [{}])[0].get('type', 'unknown')}"
+                                if chart_config:
+                                    logger.debug("Chart config generated.")
+                                    import json
+
+                                    chart_id = str(uuid4())
+
+                                    config_str = json.dumps(chart_config)
+                                    if (
+                                        CONFIG.USE_CONTEXT
+                                        and self.conversation_state
+                                        and self.conversation_state._storage
+                                    ):
+                                        await self.conversation_state._storage.write(
+                                            {chart_id: {"config_json": config_str}}
+                                        )
+                                    else:
+                                        await self.database.save_chart_config(
+                                            chart_id, config_str
+                                        )
+
+                                    # Add a button to the summary_card
+                                    summary_card.add_item(
+                                        {
+                                            "type": "ActionSet",
+                                            "actions": [
+                                                {
+                                                    "type": "Action.Submit",
+                                                    "title": "📊 View Chart",
+                                                    "data": {
+                                                        "msteams": {
+                                                            "type": "task/fetch"
+                                                        },
+                                                        "action": "fetch_chart",
+                                                        "chart_id": chart_id,
+                                                    },
+                                                }
+                                            ],
+                                        }
                                     )
                             except Exception as ce:
                                 logger.error(
-                                    f"Failed to generate chart card: {ce}", exc_info=True
+                                    f"Failed to generate chart config: {ce}",
+                                    exc_info=True,
                                 )
-                                chart_card = None
+                                chart_config = None
                     except Exception as e:
                         logger.error(f"Failed to generate summary: {e}", exc_info=True)
                 else:
-                    logger.info("No results returned by Genie (row_count is 0 or missing).")
+                    logger.info(
+                        "No results returned by Genie (row_count is 0 or missing)."
+                    )
                     summary_card.add_text("No results were found for your query.")
 
                 logger.debug(f"Data row count: {row_count}")
@@ -483,14 +570,6 @@ class MessageHandler:
             await turn_context.send_activity(
                 MessageFactory.attachment(summary_attachment)
             )
-
-            if chart_card:
-                logger.debug("Sending Chart Adaptive Card response to user.")
-                # chart_card is a raw dict produced by AdaptiveCardChartGenerator
-                chart_attachment = CardFactory.adaptive_card(chart_card)
-                await turn_context.send_activity(
-                    MessageFactory.attachment(chart_attachment)
-                )
 
             if table_card:
                 logger.debug("Sending Table Adaptive Card response to user.")
@@ -534,7 +613,9 @@ class MessageHandler:
                         exception=exception_str,
                     )
                 else:
-                    logger.debug("Skipping GenieAuditLog insertion because U2M OAuth natively logs user identity in Databricks.")
+                    logger.debug(
+                        "Skipping GenieAuditLog insertion because U2M OAuth natively logs user identity in Databricks."
+                    )
             except Exception as db_err:
                 logger.error(f"Failed to save query log: {db_err}", exc_info=True)
 
@@ -618,13 +699,16 @@ class MessageHandler:
                     if creds_kwargs is None:
                         return
                     from handlers.workspace_list_handler import WorkspaceListHandler
-                    handler = WorkspaceListHandler(self.database, self.user_state, self.conversation_state)
+
+                    handler = WorkspaceListHandler(
+                        self.database, self.user_state, self.conversation_state
+                    )
                     await handler.handle_list_workspaces(
-                        turn_context, 
-                        user_id, 
+                        turn_context,
+                        user_id,
                         account_host=CONFIG.DATABRICKS_ACCOUNT_HOST,
                         account_id=CONFIG.DATABRICKS_ACCOUNT_ID,
-                        **creds_kwargs
+                        **creds_kwargs,
                     )
                 elif fuzz.partial_ratio(text, COMMAND_LIST_SPACES) >= 70:
                     # Use fuzzy matching to allow for minor typos
@@ -646,16 +730,24 @@ class MessageHandler:
                     # Genie spaces are visible immediately without a manual refresh.
                     await self._clear_space_cache(turn_context, user_id)
 
-                    selection_dict = await self._get_user_selection_dict(turn_context, user_id)
+                    selection_dict = await self._get_user_selection_dict(
+                        turn_context, user_id
+                    )
                     workspace_host = selection_dict.get("workspace_host")
 
                     logger.debug("Calling GenieListHandler to fetch spaces.")
-                    await self._refresh_and_send_spaces(turn_context, user_id, creds_kwargs, workspace_host)
+                    await self._refresh_and_send_spaces(
+                        turn_context, user_id, creds_kwargs, workspace_host
+                    )
                 else:
                     # Check if user has a space selected
                     logger.debug("Checking if user has an active Genie space selected.")
-                    selection_dict = await self._get_user_selection_dict(turn_context, user_id)
-                    user_selection = UserSelection(**selection_dict) if selection_dict else None
+                    selection_dict = await self._get_user_selection_dict(
+                        turn_context, user_id
+                    )
+                    user_selection = (
+                        UserSelection(**selection_dict) if selection_dict else None
+                    )
                     if user_selection and user_selection.space_id:
                         logger.info(
                             f"User has selected scope {user_selection.space_id}. Delegating to handle_genie_question."

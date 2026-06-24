@@ -5,7 +5,7 @@ This module provides the Database class which wraps SQLAlchemy and SQLModel
 to interact with the SQLite or PostgreSQL database asynchronously.
 """
 import os
-from .db_models import UserSelection, GenieSpace, SecurityGroupMapping, GenieAuditLog, UserToken
+from .db_models import UserSelection, GenieSpace, SecurityGroupMapping, GenieAuditLog, UserToken, ChartCache
 from sqlmodel import select, delete, SQLModel
 from sqlalchemy.ext.asyncio import create_async_engine
 from sqlmodel.ext.asyncio.session import AsyncSession
@@ -468,3 +468,35 @@ class Database:
                 return True
             return False
 
+    async def save_chart_config(self, chart_id: str, config_json: str) -> ChartCache:
+        """Saves a generated Chart.js configuration for later retrieval.
+
+        Args:
+            chart_id (str): The unique identifier for the chart.
+            config_json (str): The JSON string representation of the chart config.
+
+        Returns:
+            ChartCache: The saved chart cache record.
+        """
+        logger.debug(f"Saving chart config for chart ID: {chart_id}")
+        async with AsyncSession(self.engine) as session:
+            chart_cache = ChartCache(id=chart_id, config_json=config_json)
+            session.add(chart_cache)
+            await session.commit()
+            await session.refresh(chart_cache)
+            return chart_cache
+
+    async def get_chart_config(self, chart_id: str) -> ChartCache | None:
+        """Retrieves a previously saved Chart.js configuration.
+
+        Args:
+            chart_id (str): The unique identifier for the chart.
+
+        Returns:
+            ChartCache | None: The chart cache record, or None if not found.
+        """
+        logger.debug(f"Fetching chart config for chart ID: {chart_id}")
+        async with AsyncSession(self.engine) as session:
+            statement = select(ChartCache).where(ChartCache.id == chart_id)
+            result = await session.exec(statement)
+            return result.first()
