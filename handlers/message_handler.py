@@ -26,6 +26,7 @@ from database.database import Database
 from database.db_models import UserSelection
 from utils.llm_summarizer import LlmSummarizer
 from utils.chartjs_generator import ChartJsGenerator
+from utils.chart_card_generator import AdaptiveCardChartGenerator
 from utils.credential_resolver import CredentialResolver
 from utils.excel_generator import ExcelGenerator
 
@@ -66,6 +67,7 @@ class MessageHandler:
         )
         self.llm_summarizer = LlmSummarizer()
         self.chart_generator = ChartJsGenerator()
+        self.chart_card_generator = AdaptiveCardChartGenerator()
         self.credential_resolver = CredentialResolver(database, user_state)
 
     async def _get_user_selection_dict(
@@ -423,6 +425,7 @@ class MessageHandler:
 
             table_card = None
             chart_config = None
+            chart_card = None
 
             if "data" in genie_response and "columns" in genie_response:
                 data_dict = genie_response.get("data", {})
@@ -465,67 +468,86 @@ class MessageHandler:
                         # Generate chart config via dedicated LLM agent when charts are enabled
                         if (
                             os.environ.get("ENABLE_CHARTS", "inactive").lower()
-                            == "active"
+                            in ("active", "true")
                         ):
-                            try:
-                                logger.debug(
-                                    "Requesting Chart.js config from ChartJsGenerator."
-                                )
-                                chart_data_slice = data_array[
-                                    :30
-                                ]  # Can allow more data since it's HTML
-                                chart_config = await asyncio.to_thread(
-                                    self.chart_generator.generate_chart_config,
-                                    genie_response["columns"]["columns"],
-                                    chart_data_slice,
-                                    creds_kwargs.get("client_id"),
-                                    creds_kwargs.get("client_secret"),
-                                )
-                                if chart_config:
-                                    logger.debug("Chart config generated.")
-                                    import json
-
-                                    chart_id = str(uuid4())
-
-                                    config_str = json.dumps(chart_config)
-                                    if (
-                                        CONFIG.USE_CONTEXT
-                                        and self.conversation_state
-                                        and self.conversation_state._storage
-                                    ):
-                                        await self.conversation_state._storage.write(
-                                            {chart_id: {"config_json": config_str}}
-                                        )
-                                    else:
-                                        await self.database.save_chart_config(
-                                            chart_id, config_str
-                                        )
-
-                                    # Add a button to the summary_card
-                                    summary_card.add_item(
-                                        {
-                                            "type": "ActionSet",
-                                            "actions": [
-                                                {
-                                                    "type": "Action.Submit",
-                                                    "title": "📊 View Chart",
-                                                    "data": {
-                                                        "msteams": {
-                                                            "type": "task/fetch"
-                                                        },
-                                                        "action": "fetch_chart",
-                                                        "chart_id": chart_id,
-                                                    },
-                                                }
-                                            ],
-                                        }
+                            use_chartjs = os.environ.get("USE_CHARTJS", "false").lower() in ("active", "true")
+                            
+                            if use_chartjs:
+                                try:
+                                    logger.debug(
+                                        "Requesting Chart.js config from ChartJsGenerator."
                                     )
-                            except Exception as ce:
-                                logger.error(
-                                    f"Failed to generate chart config: {ce}",
-                                    exc_info=True,
-                                )
-                                chart_config = None
+                                    chart_data_slice = data_array[
+                                        :30
+                                    ]  # Can allow more data since it's HTML
+                                    chart_config = await asyncio.to_thread(
+                                        self.chart_generator.generate_chart_config,
+                                        genie_response["columns"]["columns"],
+                                        chart_data_slice,
+                                        creds_kwargs.get("client_id"),
+                                        creds_kwargs.get("client_secret"),
+                                    )
+                                    if chart_config:
+                                        logger.debug("Chart config generated.")
+                                        import json
+
+                                        chart_id = str(uuid4())
+
+                                        config_str = json.dumps(chart_config)
+                                        if (
+                                            CONFIG.USE_CONTEXT
+                                            and self.conversation_state
+                                            and self.conversation_state._storage
+                                        ):
+                                            await self.conversation_state._storage.write(
+                                                {chart_id: {"config_json": config_str}}
+                                            )
+                                        else:
+                                            await self.database.save_chart_config(
+                                                chart_id, config_str
+                                            )
+
+                                        # Add a button to the summary_card
+                                        summary_card.add_item(
+                                            {
+                                                "type": "ActionSet",
+                                                "actions": [
+                                                    {
+                                                        "type": "Action.Submit",
+                                                        "title": "📊 View Chart",
+                                                        "data": {
+                                                            "msteams": {
+                                                                "type": "task/fetch"
+                                                            },
+                                                            "action": "fetch_chart",
+                                                            "chart_id": chart_id,
+                                                        },
+                                                    }
+                                                ],
+                                            }
+                                        )
+                                except Exception as ce:
+                                    logger.error(
+                                        f"Failed to generate chart config: {ce}",
+                                        exc_info=True,
+                                    )
+                                    chart_config = None
+                            else:
+                                try:
+                                    logger.debug("Requesting native Adaptive Card chart.")
+                                    chart_data_slice = data_array[:50]
+                                    chart_card = await asyncio.to_thread(
+                                        self.chart_card_generator.generate_chart_card,
+                                        genie_response["columns"]["columns"],
+                                        chart_data_slice,
+                                        creds_kwargs.get("client_id"),
+                                        creds_kwargs.get("client_secret"),
+                                    )
+                                    if chart_card:
+                                        logger.debug("Native chart card generated.")
+                                except Exception as ce:
+                                    logger.error(f"Failed to generate native chart card: {ce}", exc_info=True)
+                                    chart_card = None
                     except Exception as e:
                         logger.error(f"Failed to generate summary: {e}", exc_info=True)
                 else:
@@ -570,6 +592,13 @@ class MessageHandler:
             await turn_context.send_activity(
                 MessageFactory.attachment(summary_attachment)
             )
+
+            if chart_card:
+                logger.debug("Sending Chart Adaptive Card response to user.")
+                chart_attachment = CardFactory.adaptive_card(chart_card)
+                await turn_context.send_activity(
+                    MessageFactory.attachment(chart_attachment)
+                )
 
             if table_card:
                 logger.debug("Sending Table Adaptive Card response to user.")
