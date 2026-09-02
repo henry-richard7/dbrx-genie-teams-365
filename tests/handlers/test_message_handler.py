@@ -351,3 +351,142 @@ async def test_handle_genie_question_insights_enabled(mock_database, mock_turn_c
         mock_summarizer.summarize.assert_called_once()
 
 
+@pytest.mark.asyncio
+async def test_handle_genie_question_more_than_100_rows(mock_database, mock_turn_context, monkeypatch):
+    monkeypatch.setenv("DATABRICKS_TOKEN", "test-token")
+    monkeypatch.setenv("GET_AI_INSIGHTS", "false")
+    mock_turn_context.activity.from_property.name = "Bob Smith"
+
+    user_sel = UserSelection(user_id="user_123", space_id="s1", space_name="Space 1")
+    mock_database.add_query_log = AsyncMock()
+
+    # Create 120 dummy rows
+    rows = [[i, f"item_{i}"] for i in range(120)]
+    mock_genie_instance = MagicMock()
+    mock_genie_instance.ask_genie = AsyncMock(return_value={
+        "response": {
+            "message": "Query completed",
+            "query": "SELECT * FROM large_table",
+            "data": {"row_count": 120, "data_array": rows},
+            "columns": {
+                "column_count": 2,
+                "columns": [
+                    {"name": "id", "type_name": "INT"},
+                    {"name": "name", "type_name": "STRING"},
+                ],
+            },
+        },
+        "conversation_id": "conv_120",
+    })
+
+    with (
+        patch("handlers.message_handler.Genie", return_value=mock_genie_instance),
+        patch("handlers.message_handler.FileCardHandler") as mock_file_card_handler_cls,
+        patch("handlers.message_handler.LlmSummarizer"),
+    ):
+        mock_file_card_handler = mock_file_card_handler_cls.return_value
+        mock_file_card_handler.send_file_card = AsyncMock()
+
+        handler = MessageHandler(mock_database)
+
+        await handler.handle_genie_question(
+            mock_turn_context, "user_123", "show me all records", user_sel
+        )
+
+        # Verify Excel file card was triggered
+        mock_file_card_handler.send_file_card.assert_called_once()
+        call_kwargs = mock_file_card_handler.send_file_card.call_args[1]
+        assert call_kwargs["filename"].endswith(".xlsx")
+        assert call_kwargs["file_size"] > 0
+
+        # Verify the table card was sent and contains only 50 data rows (+ 1 header row = 51 rows)
+        sent_activities = [
+            call.args[0] for call in mock_turn_context.send_activity.call_args_list
+            if hasattr(call.args[0], "attachments") and call.args[0].attachments
+        ]
+        table_activities = [
+            act for act in sent_activities
+            if any(
+                item.get("type") == "Table"
+                for item in act.attachments[0].content.get("body", [])
+            )
+        ]
+        assert len(table_activities) == 1
+        table_card_body = table_activities[0].attachments[0].content["body"]
+        table_item = next(item for item in table_card_body if item.get("type") == "Table")
+        # 1 header row + 50 data rows = 51 rows
+        assert len(table_item["rows"]) == 51
+
+        # Check for the informative text block indicating first 50 records
+        text_item = next(
+            (item for item in table_card_body if item.get("type") == "TextBlock" and "Showing first 50 of 120" in item.get("text", "")),
+            None
+        )
+        assert text_item is not None
+
+
+@pytest.mark.asyncio
+async def test_handle_genie_question_exactly_100_rows(mock_database, mock_turn_context, monkeypatch):
+    monkeypatch.setenv("DATABRICKS_TOKEN", "test-token")
+    monkeypatch.setenv("GET_AI_INSIGHTS", "false")
+    mock_turn_context.activity.from_property.name = "Bob Smith"
+
+    user_sel = UserSelection(user_id="user_123", space_id="s1", space_name="Space 1")
+    mock_database.add_query_log = AsyncMock()
+
+    # Create 100 rows (should not trigger excel download, table should show all 100 rows)
+    rows = [[i, f"item_{i}"] for i in range(100)]
+    mock_genie_instance = MagicMock()
+    mock_genie_instance.ask_genie = AsyncMock(return_value={
+        "response": {
+            "message": "Query completed",
+            "query": "SELECT * FROM hundred_table",
+            "data": {"row_count": 100, "data_array": rows},
+            "columns": {
+                "column_count": 2,
+                "columns": [
+                    {"name": "id", "type_name": "INT"},
+                    {"name": "name", "type_name": "STRING"},
+                ],
+            },
+        },
+        "conversation_id": "conv_100",
+    })
+
+    with (
+        patch("handlers.message_handler.Genie", return_value=mock_genie_instance),
+        patch("handlers.message_handler.FileCardHandler") as mock_file_card_handler_cls,
+        patch("handlers.message_handler.LlmSummarizer"),
+    ):
+        mock_file_card_handler = mock_file_card_handler_cls.return_value
+        mock_file_card_handler.send_file_card = AsyncMock()
+
+        handler = MessageHandler(mock_database)
+
+        await handler.handle_genie_question(
+            mock_turn_context, "user_123", "show me 100 records", user_sel
+        )
+
+        # File card should NOT be sent when row count <= 100
+        mock_file_card_handler.send_file_card.assert_not_called()
+
+        # Verify the table card was sent and contains all 100 data rows (+ 1 header row = 101 rows)
+        sent_activities = [
+            call.args[0] for call in mock_turn_context.send_activity.call_args_list
+            if hasattr(call.args[0], "attachments") and call.args[0].attachments
+        ]
+        table_activities = [
+            act for act in sent_activities
+            if any(
+                item.get("type") == "Table"
+                for item in act.attachments[0].content.get("body", [])
+            )
+        ]
+        assert len(table_activities) == 1
+        table_card_body = table_activities[0].attachments[0].content["body"]
+        table_item = next(item for item in table_card_body if item.get("type") == "Table")
+        # 1 header row + 100 data rows = 101 rows
+        assert len(table_item["rows"]) == 101
+
+
+

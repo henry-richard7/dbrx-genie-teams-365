@@ -447,26 +447,36 @@ class MessageHandler:
                     logger.info("No results returned by Genie (row_count is 0 or missing).")
                     summary_card.add_text("No results were found for your query.")
 
-                logger.debug(f"Data row count: {row_count}")
+                effective_row_count = max(row_count, len(data_array))
+                logger.debug(f"Data row count: {row_count}, effective row count: {effective_row_count}")
 
-                if row_count < 100:
-                    logger.debug("Row count < 100, creating table Adaptive Card.")
-                    table_card = AdaptiveCardTemplate()
+                table_card = AdaptiveCardTemplate()
+                if effective_row_count > 100:
+                    logger.debug(
+                        "Row count > 100, creating table Adaptive Card with first 50 records and preparing Excel file for upload."
+                    )
+                    table_card.add_text(
+                        f"Showing first 50 of {effective_row_count} records. Download the attached Excel file to view all records."
+                    )
+                    table_card.add_query_result_table(
+                        genie_response["columns"], {"data_array": data_array[:50]}
+                    )
+                    sending_excel = True
+
+                    logger.debug("Creating Polars DataFrame.")
+                    columns_list = (
+                        genie_response["columns"]["columns"]
+                        if isinstance(genie_response["columns"], dict) and "columns" in genie_response["columns"]
+                        else genie_response["columns"]
+                    )
+                    filename, excel_buffer = ExcelGenerator.generate_excel_from_data(
+                        data_array, columns_list
+                    )
+                else:
+                    logger.debug("Row count <= 100, creating table Adaptive Card with all records.")
                     # Pass a dict that guarantees 'data_array' exists to avoid KeyError downstream
                     table_card.add_query_result_table(
                         genie_response["columns"], {"data_array": data_array}
-                    )
-                else:
-                    # For large datasets, we add a button to download the results as CSV/Excel
-                    # Generate Excel in memory to avoid disk I/O
-                    logger.debug("Row count >= 100, preparing Excel file for upload.")
-                    sending_excel = True
-
-                    # Create the dataframe
-                    logger.debug("Creating Polars DataFrame.")
-
-                    filename, excel_buffer = ExcelGenerator.generate_excel_from_data(
-                        data_array, genie_response["columns"]["columns"]
                     )
 
             if "query" in genie_response:
