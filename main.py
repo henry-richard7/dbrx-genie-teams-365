@@ -98,7 +98,7 @@ elif environ.get("STORAGE") == "s3":
         aws_secret_access_key=environ.get("S3_SECRET_ACCESS_KEY"),
         region_name=environ.get("S3_REGION", "us-east-1"),
         key_prefix=environ.get("S3_KEY_PREFIX", ""),
-        disable_signing=environ.get("S3_DISABLE_SIGNING", "false").lower() == "true",
+        #disable_signing=environ.get("S3_DISABLE_SIGNING", "false").lower() == "true",
     )
 else:
     STORAGE = MemoryStorage()
