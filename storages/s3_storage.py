@@ -7,10 +7,12 @@ for persisting bot state in AWS S3 or compatible object storage services.
 import asyncio
 import json
 import logging
+import os
 from threading import Lock
 from typing import TypeVar
 
 import boto3
+from botocore.config import Config
 from botocore.exceptions import ClientError
 
 from microsoft_agents.hosting.core import Storage
@@ -36,6 +38,7 @@ class S3Storage(Storage):
             aws_secret_access_key="minioadmin",
             region_name="us-east-1",
             key_prefix="agent-state/",              # optional namespace prefix
+            disable_signing=False,                  # True for path-style & non-chunked signing
         )
     """
 
@@ -48,6 +51,7 @@ class S3Storage(Storage):
         region_name: str = "us-east-1",
         key_prefix: str = "",
         create_bucket_if_not_exists: bool = True,
+        disable_signing: bool | None = None,
     ):
         """Initializes the S3Storage instance.
         
@@ -59,18 +63,34 @@ class S3Storage(Storage):
             region_name (str): AWS region name. Defaults to "us-east-1".
             key_prefix (str): Prefix to prepend to all keys. Defaults to "".
             create_bucket_if_not_exists (bool): If True, attempts to create the bucket if missing.
+            disable_signing (bool | None): If True, applies path-style addressing and disables payload
+                chunked signing (s3v4). If None, reads from S3_DISABLE_SIGNING environment variable.
         """
         self._bucket = bucket_name
         self._prefix = key_prefix
         self._lock = Lock()
 
-        self._s3 = boto3.client(
-            "s3",
-            endpoint_url=endpoint_url,
-            aws_access_key_id=aws_access_key_id,
-            aws_secret_access_key=aws_secret_access_key,
-            region_name=region_name,
-        )
+        if disable_signing is None:
+            disable_signing = os.environ.get("S3_DISABLE_SIGNING", "false").lower() == "true"
+
+        client_kwargs = {
+            "endpoint_url": endpoint_url,
+            "aws_access_key_id": aws_access_key_id,
+            "aws_secret_access_key": aws_secret_access_key,
+            "region_name": region_name,
+        }
+
+        # Only apply path-style and non-chunked signing if requested in .env
+        if disable_signing:
+            client_kwargs["config"] = Config(
+                signature_version="s3v4",
+                s3={
+                    "addressing_style": "path",
+                    "payload_signing_enabled": False
+                }
+            )
+
+        self._s3 = boto3.client("s3", **client_kwargs)
 
         if create_bucket_if_not_exists:
             self._ensure_bucket()

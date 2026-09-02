@@ -130,6 +130,7 @@ S3_ACCESS_KEY_ID=minioadmin
 S3_SECRET_ACCESS_KEY=minioadmin
 S3_REGION=us-east-1
 S3_KEY_PREFIX=agent-state/
+S3_DISABLE_SIGNING=false # Set to true to apply path-style addressing and non-chunked signing (e.g. for MinIO / custom S3)
 
 # If STORAGE=cosmos
 COSMOS_DB_ENDPOINT=https://your-cosmos-db-account.documents.azure.com:443/
