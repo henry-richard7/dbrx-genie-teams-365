@@ -103,11 +103,7 @@ ENABLE_CHARTS=active
 # Optional: Enable AI Insights to summarize the query response
 GET_AI_INSIGHTS=true
 
-# OpenAI-Compatible LLM Settings (e.g., Databricks, OpenAI, OrcaRouter, vLLM, Ollama)
-# To use OrcaRouter (Get an API key via referral: https://www.orcarouter.ai/ref/ref_0a1e6a219c956b889037):
-# OPENAI_BASE_URL=https://api.orcarouter.ai/v1
-# OPENAI_MODEL_NAME=orcarouter/auto
-# OPENAI_API_KEY=your_orcarouter_api_key
+# OpenAI-Compatible LLM Settings (e.g., Databricks, OpenAI, vLLM, Ollama)
 OPENAI_MODEL_NAME=gpt-4o-mini
 OPENAI_BASE_URL=https://api.openai.com/v1
 OPENAI_API_KEY=your_api_key_here
@@ -153,6 +149,19 @@ AZURE_BLOB_URL=https://your-account.blob.core.windows.net
 
 # Optional: Token Encryption Settings
 TOKEN_ENCRYPTION_KEY=your_generated_fernet_key_here
+```
+
+### 🐋 OrcaRouter Multi-Model Routing Settings (Optional)
+
+You can route LLM summarization and insight queries through [OrcaRouter](https://www.orcarouter.ai/ref/ref_0a1e6a219c956b889037) to access hundreds of models (e.g., DeepSeek, Claude, GPT, Llama) with automatic routing and fallback:
+
+> 💡 **Referral Link**: Sign up and get an API key via [OrcaRouter](https://www.orcarouter.ai/ref/ref_0a1e6a219c956b889037).
+
+```ini
+# OrcaRouter Settings (OpenAI-Compatible Multi-Model AI Gateway)
+OPENAI_BASE_URL=https://api.orcarouter.ai/v1
+OPENAI_MODEL_NAME=orcarouter/auto
+OPENAI_API_KEY=your_orcarouter_api_key
 ```
 
 ### 🔐 Setting up Databricks OAuth via Azure Security Groups (M2M)
