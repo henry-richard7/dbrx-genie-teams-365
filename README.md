@@ -2,6 +2,9 @@
 
 <div align="center">
   <p><strong>A production-ready Microsoft Teams chatbot integrating Databricks Genie, FastAPI, and AI for real-time data analytics.</strong></p>
+  <p>
+    <a href="https://www.orcarouter.ai/ref/ref_0a1e6a219c956b889037"><img src="https://img.shields.io/badge/Built%20with-OrcaRouter-0070f3?style=flat-square&logo=openai&logoColor=white" alt="Built with OrcaRouter" /></a>
+  </p>
 </div>
 
 Welcome to the **Databricks Genie Teams Bot** repository. This powerful, production-ready **Microsoft Teams chatbot** interfaces seamlessly with **Databricks Genie** to deliver natural language data analytics, AI-driven insights, and rich data visualizations directly within your enterprise Teams chat. 
@@ -14,7 +17,7 @@ Built using modern Python frameworks like **FastAPI**, **AsyncIO**, and **SQLMod
 
 *   **🗣️ Natural Language Data Analytics**: Ask complex questions about your data in plain English (e.g., *"What were our top 5 products by revenue last quarter?"*) and let the bot generate the SQL.
 *   **📊 Rich Adaptive Cards & Dynamic Charts**: Automatically visualizes Databricks query results with interactive charts (Vertical Bars, Grouped Bars, Donuts, Stacked Horizontal Bars) and structured UI data tables. 
-*   **🧠 AI Chatbot Summarization & Insights**: Uses Databricks-hosted LLMs (Large Language Models like GPT-4o, Llama 3) to automatically generate concise summaries and "Next Best Actions" based on the data.
+*   **🧠 AI Chatbot Summarization & Insights**: Uses Databricks-hosted or OpenAI-compatible LLMs (e.g., OpenAI, [OrcaRouter](https://www.orcarouter.ai/ref/ref_0a1e6a219c956b889037) for multi-model routing, vLLM, Ollama) to automatically generate concise summaries and "Next Best Actions" based on the data.
 *   **📂 Distributed Excel Export for Big Data**: Automatically converts large SQL datasets (>100 rows) into downloadable Excel files to bypass Microsoft Teams payload limits. Temporarily caches data payloads natively in Bot Framework state (via S3, MinIO, or memory) to prevent node memory exhaustion (only if `USE_CONTEXT` is enabled; otherwise, falls back to local application memory caching).
 *   **🔐 Multi-Tenant Scoped Access Control (Azure AD)**: Dynamically resolves user credentials using Microsoft Entra ID (Azure AD) security groups. Users query Databricks using authorized Service Principals (M2M) or interactive Custom OAuth (U2M).
 *   **🔒 Encrypted Credentials & Security**: User OAuth access tokens and refresh tokens are securely encrypted at rest.
@@ -100,7 +103,11 @@ ENABLE_CHARTS=active
 # Optional: Enable AI Insights to summarize the query response
 GET_AI_INSIGHTS=true
 
-# OpenAI-Compatible LLM Settings (e.g., Databricks, OpenAI, vLLM, Ollama)
+# OpenAI-Compatible LLM Settings (e.g., Databricks, OpenAI, OrcaRouter, vLLM, Ollama)
+# To use OrcaRouter (Get an API key via referral: https://www.orcarouter.ai/ref/ref_0a1e6a219c956b889037):
+# OPENAI_BASE_URL=https://api.orcarouter.ai/v1
+# OPENAI_MODEL_NAME=orcarouter/auto
+# OPENAI_API_KEY=your_orcarouter_api_key
 OPENAI_MODEL_NAME=gpt-4o-mini
 OPENAI_BASE_URL=https://api.openai.com/v1
 OPENAI_API_KEY=your_api_key_here
