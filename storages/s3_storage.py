@@ -51,6 +51,7 @@ class S3Storage(Storage):
         region_name: str = "us-east-1",
         key_prefix: str = "",
         create_bucket_if_not_exists: bool = True,
+        disable_signing: bool | None = None,
     ):
         """Initializes the S3Storage instance.
         
@@ -69,7 +70,8 @@ class S3Storage(Storage):
         self._prefix = key_prefix
         self._lock = Lock()
 
-        disable_signing = os.getenv("S3_DISABLE_SIGNING", "false").lower() in ("true", "1", "yes")
+        if disable_signing is None:
+            disable_signing = os.getenv("S3_DISABLE_SIGNING", "false").lower() in ("true", "1", "yes")
 
         client_kwargs = {
             "endpoint_url": endpoint_url,

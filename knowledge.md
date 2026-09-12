@@ -108,7 +108,7 @@ To bypass Microsoft Teams Adaptive Card size limits and ensure performance, larg
 *   **Storage Injection:** To prevent Out-Of-Memory (OOM) crashes on large payloads in multi-pod deployments, the bot does not keep these large byte buffers in local Python dictionary memory. Instead, the `FileCardHandler` injects the native Bot Framework `Storage` provider (such as the custom `S3Storage`, `CosmosDBStorage`, or `BlobStorage` backends).
 *   **Base64 Offloading:** When a large query completes, the raw Excel bytes are `base64` encoded and written entirely to the configured distributed storage (e.g., AWS S3, Azure Cosmos DB, Azure Blob) mapped to a unique `file_<id>` key.
 *   **Just-In-Time Delivery & Cleanup:** When the user clicks "Accept" on the Teams file consent card, the bot securely retrieves the `base64` string from the distributed storage, decodes it, uploads it to OneDrive/SharePoint via the Bot Framework API, and immediately deletes the payload from the storage to ensure no stale data remains persisted.
-*   **Fallback:** If `USE_CONTEXT` is disabled, it safely falls back to storing the bytes locally in a class-level dictionary (`FileCardHandler._pending_files`).
+*   **Fallback:** If `USE_CONTEXT` is disabled, it safely falls back to saving the file in a temporary folder on disk (`teams_genie_bot_files`), which is immediately deleted as soon as the user downloads or declines the file.
 
 ## 5. Multi-Scope Authentication Explained
 The bot is designed to serve as a centralized interface for multiple enterprise teams (e.g., HR, Finance, Engineering), each with its own distinct Databricks environments and strict data access privileges. To securely enforce these data boundaries, the bot employs a **Multi-Scope Authentication** model. 

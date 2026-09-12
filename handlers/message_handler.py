@@ -58,7 +58,9 @@ class MessageHandler:
         self.genie_list_handler = GenieListHandler(
             database, user_state, conversation_state
         )
-        self.file_card_handler = FileCardHandler(storage=self.user_state._storage if self.user_state else None)
+        self.file_card_handler = FileCardHandler(
+            storage=self.user_state._storage if (CONFIG.USE_CONTEXT and self.user_state) else None
+        )
         self.llm_summarizer = LlmSummarizer()
         self.chart_card_generator = AdaptiveCardChartGenerator()
         self.credential_resolver = CredentialResolver(database, user_state)

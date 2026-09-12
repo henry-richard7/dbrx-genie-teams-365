@@ -19,8 +19,10 @@ from handlers.file_card_handler import FileCardHandler
 from handlers.message_handler import MessageHandler
 from database.database import Database
 from utils.user_group import UserGroup
+from config import DefaultConfig
 
 logger = logging.getLogger(__name__)
+CONFIG = DefaultConfig()
 
 
 class TeamsGenieBot(TeamsActivityHandler):
@@ -43,7 +45,9 @@ class TeamsGenieBot(TeamsActivityHandler):
         self.conversation_state = conversation_state
         self.database = Database()
         self.message_handler = MessageHandler(self.database, self.user_state, self.conversation_state)
-        self.file_card_handler = FileCardHandler(storage=self.user_state._storage if self.user_state else None)
+        self.file_card_handler = FileCardHandler(
+            storage=self.user_state._storage if (CONFIG.USE_CONTEXT and self.user_state) else None
+        )
         self.user_group = UserGroup()
         self.session = None
 

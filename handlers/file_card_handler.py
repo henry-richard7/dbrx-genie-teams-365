@@ -26,6 +26,15 @@ from microsoft_agents.activity.teams import (
 )
 
 
+from pathlib import Path
+import tempfile
+
+from config import DefaultConfig
+
+logger = logging.getLogger(__name__)
+CONFIG = DefaultConfig()
+
+
 class FileCacheStoreItem:
     """Wrapper to satisfy the Bot Framework StoreItem interface."""
     def __init__(self, data: dict = None, **kwargs):
@@ -46,14 +55,12 @@ class FileCardHandler:
     It creates and processes FileConsentCards, allowing the bot to send large
     Databricks SQL query results as Excel file attachments directly in the chat.
 
-    File bytes are stored in a class-level in-memory cache (``_pending_files``) keyed
-    by a UUID so that the FileConsentCard payload stays small and Teams never rejects
-    it with a 413. The cache entry is removed after the user accepts or declines.
+    When distributed storage (USE_CONTEXT) is disabled, file bytes are saved to a
+    dedicated temp directory on disk keyed by UUID, preventing memory accumulation,
+    and are immediately deleted once the user accepts the upload or declines.
     """
 
-    # Class-level cache shared across all FileCardHandler instances.
-    # Maps file_id (str UUID) -> dict with 'bytes' and 'timestamp'.
-    _pending_files: dict = {}
+    _TEMP_DIR = Path(tempfile.gettempdir()) / "teams_genie_bot_files"
     _FILE_TTL_SECONDS = 3600  # 1 hour
 
     def __init__(self, storage=None):
@@ -65,24 +72,29 @@ class FileCardHandler:
         self.storage = storage
 
     @classmethod
-    def _cleanup_expired_files(cls):
-        """Cleans up expired file data from the class-level cache.
+    def _get_temp_file_path(cls, file_id: str) -> Path:
+        """Returns the filesystem Path for a given file_id."""
+        return cls._TEMP_DIR / f"pending_file_{file_id}.bin"
 
-        Iterates through `_pending_files` and removes any entries that have
-        exceeded `_FILE_TTL_SECONDS`.
-        """
-        import time
+    @classmethod
+    def _cleanup_expired_files(cls):
+        """Cleans up expired temporary files older than _FILE_TTL_SECONDS."""
+        if not cls._TEMP_DIR.exists():
+            return
         current_time = time.time()
-        expired_keys = [
-            k for k, v in cls._pending_files.items()
-            if isinstance(v, dict) and current_time - v.get('timestamp', 0) > cls._FILE_TTL_SECONDS
-        ]
-        for k in expired_keys:
-            del cls._pending_files[k]
+        try:
+            for f in cls._TEMP_DIR.glob("pending_file_*.bin"):
+                try:
+                    if current_time - f.stat().st_mtime > cls._FILE_TTL_SECONDS:
+                        f.unlink(missing_ok=True)
+                except OSError:
+                    pass
+        except Exception as e:
+            logger.warning(f"FileCardHandler: Error during expired temp file cleanup: {e}")
 
     async def _save_file_bytes(self, file_id: str, file_bytes: bytes):
-        """Saves file bytes either to Bot Framework Storage (if available) or to memory cache."""
-        if self.storage:
+        """Saves file bytes either to Bot Framework Storage (if USE_CONTEXT is true) or to temp disk."""
+        if CONFIG.USE_CONTEXT and self.storage:
             encoded = base64.b64encode(file_bytes).decode('utf-8')
             await self.storage.write({
                 f"file_{file_id}": FileCacheStoreItem({
@@ -92,14 +104,17 @@ class FileCardHandler:
             })
         else:
             self._cleanup_expired_files()
-            FileCardHandler._pending_files[file_id] = {
-                'bytes': file_bytes,
-                'timestamp': time.time()
-            }
+            try:
+                self._TEMP_DIR.mkdir(parents=True, exist_ok=True)
+                temp_path = self._get_temp_file_path(file_id)
+                temp_path.write_bytes(file_bytes)
+                logger.debug(f"Saved pending file '{file_id}' to temp file: {temp_path}")
+            except Exception as e:
+                logger.error(f"Failed to write temp file for file_id '{file_id}': {e}", exc_info=True)
 
     async def _get_and_delete_file_bytes(self, file_id: str) -> bytes | None:
-        """Retrieves file bytes from storage/cache and immediately deletes them to free memory."""
-        if self.storage:
+        """Retrieves file bytes from storage/temp disk and immediately deletes them to free space."""
+        if CONFIG.USE_CONTEXT and self.storage:
             data = await self.storage.read([f"file_{file_id}"], target_cls=FileCacheStoreItem)
             if f"file_{file_id}" in data:
                 file_data = data[f"file_{file_id}"]
@@ -116,17 +131,26 @@ class FileCardHandler:
                 return base64.b64decode(encoded) if encoded else None
             return None
         else:
-            file_data = FileCardHandler._pending_files.pop(file_id, None)
-            if file_data:
-                return file_data['bytes'] if isinstance(file_data, dict) else file_data
+            temp_path = self._get_temp_file_path(file_id)
+            if temp_path.exists():
+                try:
+                    data = temp_path.read_bytes()
+                    temp_path.unlink(missing_ok=True)
+                    logger.debug(f"Retrieved and removed temp file for download: {temp_path}")
+                    return data
+                except Exception as e:
+                    logger.error(f"Failed to read/delete temp file {temp_path}: {e}", exc_info=True)
+                    return None
             return None
 
     async def _delete_file_bytes(self, file_id: str):
-        """Deletes file bytes from storage/cache."""
-        if self.storage:
+        """Deletes file bytes from storage or temp disk."""
+        if CONFIG.USE_CONTEXT and self.storage:
             await self.storage.delete([f"file_{file_id}"])
         else:
-            FileCardHandler._pending_files.pop(file_id, None)
+            temp_path = self._get_temp_file_path(file_id)
+            temp_path.unlink(missing_ok=True)
+            logger.debug(f"Deleted temp file for file_id '{file_id}': {temp_path}")
 
     async def _file_upload_failed(self, turn_context: TurnContext, error: str):
         """Sends an error message to the user if a file upload fails.
