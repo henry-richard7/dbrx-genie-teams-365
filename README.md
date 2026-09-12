@@ -160,8 +160,12 @@ You can route LLM summarization and insight queries through [OrcaRouter](https:/
 ```ini
 # OrcaRouter Settings (OpenAI-Compatible Multi-Model AI Gateway)
 OPENAI_BASE_URL=https://api.orcarouter.ai/v1
-OPENAI_MODEL_NAME=orcarouter/auto
+OPENAI_MODEL_NAME=orcarouter/auto  # or any models
 OPENAI_API_KEY=your_orcarouter_api_key
+
+# Token & Latency Optimization (Recommended for reasoning/thinking models)
+OPENAI_MAX_TOKENS=1500
+OPENAI_DISABLE_THINKING=true
 ```
 
 ### 🔐 Setting up Databricks OAuth via Azure Security Groups (M2M)

@@ -220,6 +220,7 @@ Segment sizes must sum to 100.
 7. Always use schema version "1.5".
 8. Always include "$schema": "https://adaptivecards.io/schemas/adaptive-card.json".
 9. Output ONLY the raw JSON. Nothing else.
+10. Do not output thinking or reasoning traces, preambles, or explanations. Immediately begin output with the opening curly brace.
 
 ---
 

@@ -64,6 +64,29 @@ class BaseLLMClient:
 
         kwargs["api_key"] = environ.get("OPENAI_API_KEY")
 
+        # Configure output token ceiling if specified
+        max_tokens_env = environ.get("OPENAI_MAX_TOKENS")
+        if max_tokens_env:
+            try:
+                kwargs["max_tokens"] = int(max_tokens_env)
+            except ValueError:
+                logger.warning(
+                    f"{self.__class__.__name__}: invalid OPENAI_MAX_TOKENS '{max_tokens_env}', ignoring."
+                )
+
+        # Support disabling reasoning/thinking mode (e.g. for DeepSeek V4 Flash / OrcaRouter)
+        extra_body: dict = {}
+        if environ.get("OPENAI_DISABLE_THINKING", "false").lower() in ("true", "1", "yes"):
+            extra_body["thinking"] = {"type": "disabled"}
+            extra_body["include_reasoning"] = False
+
+        if extra_body:
+            kwargs["extra_body"] = extra_body
+
+        # Support strict JSON mode if requested
+        if environ.get("OPENAI_RESPONSE_FORMAT_JSON", "false").lower() in ("true", "1", "yes"):
+            kwargs["model_kwargs"] = {"response_format": {"type": "json_object"}}
+
         if not kwargs["api_key"] or kwargs["api_key"] == "not-provided":
             logger.debug(
                 f"{self.__class__.__name__}: no OPENAI_API_KEY, "

@@ -396,10 +396,12 @@ class MessageHandler:
                         if os.environ.get("GET_AI_INSIGHTS", "true").lower() == "true":
                             logger.debug("Generating summary from data via llm_summarizer.")
 
+                            # Slice to top 50 rows to keep input token usage bounded
+                            summary_data_slice = data_array[:50]
                             summary_result = await asyncio.to_thread(
                                 self.llm_summarizer.summarize,
                                 genie_response["columns"]["columns"],
-                                data_array,
+                                summary_data_slice,
                                 question,
                                 creds_kwargs.get("client_id"),
                                 creds_kwargs.get("client_secret"),

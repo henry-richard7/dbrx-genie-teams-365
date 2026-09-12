@@ -109,7 +109,7 @@ class LlmSummarizer(BaseLLMClient):
             User Query:
             {query}
             
-            Return ONLY valid JSON. Do not include markdown code blocks like ```json.
+            Return ONLY valid JSON. Do not include thinking or reasoning traces, preambles, or markdown code blocks.
             """
 
         formatted_prompt = prompt_template.format(data=table_text, query=question)
